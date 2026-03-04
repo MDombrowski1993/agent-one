@@ -1,10 +1,16 @@
 import chalk from 'chalk';
 import { loadConfig } from '../../config/manager.js';
-import { buildCLIListCommand, runCLICommandCapture } from '../../services/mcp/cli-commands.js';
+import { buildCLIListCommand, runCLICommandCapture, isCursorAgent } from '../../services/mcp/cli-commands.js';
 
 export async function listCommand(): Promise<void> {
   const config = await loadConfig();
   const cli = config?.defaultCli || 'claude';
+
+  if (isCursorAgent(cli)) {
+    console.log(chalk.yellow('Cursor requires manual MCP management.'));
+    console.log(chalk.cyan('View your MCP servers at: https://cursor.com/docs/context/mcp/directory'));
+    return;
+  }
 
   const cliCmd = buildCLIListCommand(cli);
 

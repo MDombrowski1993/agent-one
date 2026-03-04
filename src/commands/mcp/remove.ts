@@ -9,6 +9,7 @@ import {
   MCPScope,
   buildCLIRemoveCommand,
   runCLICommand,
+  isCursorAgent,
 } from '../../services/mcp/cli-commands.js';
 
 export async function removeCommand(serverName: string): Promise<void> {
@@ -32,26 +33,31 @@ export async function removeCommand(serverName: string): Promise<void> {
   ]);
 
   // Delegate to the native CLI command
-  const cliCmd = buildCLIRemoveCommand(cli, serverName, scope);
-
-  if (cliCmd) {
-    console.log(chalk.cyan(`\nRunning: ${cliCmd.command} ${cliCmd.args.join(' ')}`));
-
-    try {
-      const exitCode = await runCLICommand(cliCmd.command, cliCmd.args, process.cwd());
-
-      if (exitCode !== 0) {
-        console.error(chalk.red(`\nCLI command exited with code ${exitCode}`));
-        process.exit(exitCode);
-      }
-
-      console.log(chalk.green(`\n✓ MCP server "${serverName}" removed from ${cli} (${scope} scope)`));
-    } catch (error) {
-      console.error(chalk.red(`\nError running ${cli} command: ${error}`));
-      process.exit(1);
-    }
+  if (isCursorAgent(cli)) {
+    console.log(chalk.yellow(`\nCursor requires manual MCP management.`));
+    console.log(chalk.cyan('Manage your MCP servers at: https://cursor.com/docs/context/mcp/directory'));
   } else {
-    console.log(chalk.yellow(`\nNo native MCP command available for ${cli}.`));
+    const cliCmd = buildCLIRemoveCommand(cli, serverName, scope);
+
+    if (cliCmd) {
+      console.log(chalk.cyan(`\nRunning: ${cliCmd.command} ${cliCmd.args.join(' ')}`));
+
+      try {
+        const exitCode = await runCLICommand(cliCmd.command, cliCmd.args, process.cwd());
+
+        if (exitCode !== 0) {
+          console.error(chalk.red(`\nCLI command exited with code ${exitCode}`));
+          process.exit(exitCode);
+        }
+
+        console.log(chalk.green(`\n✓ MCP server "${serverName}" removed from ${cli} (${scope} scope)`));
+      } catch (error) {
+        console.error(chalk.red(`\nError running ${cli} command: ${error}`));
+        process.exit(1);
+      }
+    } else {
+      console.log(chalk.yellow(`\nNo native MCP remove command available for ${cli}.`));
+    }
   }
 
   // Clean up a1 reference if it exists

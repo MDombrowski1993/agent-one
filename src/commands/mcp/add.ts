@@ -13,6 +13,7 @@ import {
   MCPScope,
   buildCLIAddCommand,
   runCLICommand,
+  isCursorAgent,
 } from '../../services/mcp/cli-commands.js';
 
 export async function addCommand(serverName: string, options: any): Promise<void> {
@@ -196,26 +197,36 @@ export async function addCommand(serverName: string, options: any): Promise<void
 
   // Delegate to the native CLI command
   const cli = config?.defaultCli || 'claude';
-  const cliCmd = buildCLIAddCommand(cli, { name: serverName, server, scope });
 
-  if (cliCmd) {
-    console.log(chalk.cyan(`\nRunning: ${cliCmd.command} ${cliCmd.args.join(' ')}`));
-
-    try {
-      const exitCode = await runCLICommand(cliCmd.command, cliCmd.args, process.cwd());
-
-      if (exitCode !== 0) {
-        console.error(chalk.red(`\nCLI command exited with code ${exitCode}`));
-        process.exit(exitCode);
-      }
-
-      console.log(chalk.green(`\n✓ MCP server "${serverName}" added to ${cli} (${scope} scope)`));
-    } catch (error) {
-      console.error(chalk.red(`\nError running ${cli} command: ${error}`));
-      process.exit(1);
-    }
+  if (isCursorAgent(cli)) {
+    console.log(chalk.yellow(`\nCursor requires manual MCP setup.`));
+    console.log(chalk.cyan('Add your MCP server at: https://cursor.com/docs/context/mcp/directory'));
+    console.log(chalk.dim('Server reference will still be saved in a1 for skill assignment.'));
   } else {
-    console.log(chalk.yellow(`\nNo native MCP command available for ${cli}. Server reference saved only.`));
+    const cliCmd = buildCLIAddCommand(cli, { name: serverName, server, scope });
+
+    if (cliCmd) {
+      console.log(chalk.cyan(`\nRunning: ${cliCmd.command} ${cliCmd.args.join(' ')}`));
+
+      try {
+        const exitCode = await runCLICommand(cliCmd.command, cliCmd.args, process.cwd());
+
+        if (exitCode !== 0) {
+          console.error(chalk.red(`\nCLI command exited with code ${exitCode}`));
+          process.exit(exitCode);
+        }
+
+        console.log(chalk.green(`\n✓ MCP server "${serverName}" added to ${cli} (${scope} scope)`));
+      } catch (error) {
+        console.error(chalk.red(`\nError running ${cli} command: ${error}`));
+        process.exit(1);
+      }
+    } else if (cli === 'codex' && server.type !== 'stdio') {
+      console.log(chalk.yellow(`\nCodex only supports stdio MCP servers.`));
+      console.log(chalk.dim('Server reference will still be saved in a1 for skill assignment.'));
+    } else {
+      console.log(chalk.yellow(`\nNo native MCP command available for ${cli}. Server reference saved only.`));
+    }
   }
 
   // Save a reference in a1's directory format for skill association
