@@ -19,6 +19,10 @@ Thumbs.db
 .claude/
 .mcp.json
 
+# Swarm runtime
+.worktrees/
+/swarm/
+
 # IDE
 .vscode/
 .idea/

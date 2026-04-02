@@ -65,12 +65,13 @@ program
     await createCommand(sessionName, options);
   });
 
-// a1 create-swarm <swarm-name>
+// a1 create-swarm
 program
-  .command('create-swarm <swarm-name>')
-  .description('Create an agent swarm with multiple roles working sequentially')
-  .action(async (swarmName: string) => {
-    await createSwarmCommand(swarmName);
+  .command('create-swarm')
+  .description('Create an agent swarm with tier-based execution via tmux')
+  .option('--manifest <path>', 'Skip wizard and load manifest from file')
+  .action(async (options) => {
+    await createSwarmCommand(options);
   });
 
 // a1 remove <session-name>
