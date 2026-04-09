@@ -1,8 +1,9 @@
 import chalk from 'chalk';
+import inquirer from 'inquirer';
 import { loadConfig } from '../config/manager.js';
 import { CliTool } from '../config/types.js';
 import { validateBranchName } from '../utils/validation.js';
-import { createSession } from '../services/session.js';
+import { createSession, removeSession } from '../services/session.js';
 import { roleExists } from '../services/role.js';
 import { composeRoleContext } from '../services/context-composer.js';
 import { launchCLI } from '../services/cli-launcher.js';
@@ -77,15 +78,31 @@ export async function createCommand(
 
     // After CLI exits
     console.log(chalk.dim('─'.repeat(50)));
-    console.log(chalk.cyan('\nNext steps:'));
 
     if (isGit) {
       console.log(chalk.dim(`  To push: cd ${sessionPath} && git push -u origin ${sessionName}`));
-    } else {
-      console.log(chalk.dim(`  To revisit: cd ${sessionPath}`));
     }
 
-    console.log(chalk.dim(`  To clean up: a1 remove ${sessionName}`));
+    const { cleanup } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'cleanup',
+        message: 'Session ended. Clean up worktree branch?',
+        default: false,
+      },
+    ]);
+
+    if (cleanup) {
+      try {
+        await removeSession(config, sessionName);
+        console.log(chalk.green(`✓ Session removed: ${sessionName}`));
+      } catch (err) {
+        console.error(chalk.red(`Failed to clean up: ${err}`));
+        console.log(chalk.dim(`  To clean up manually: a1 remove ${sessionName}`));
+      }
+    } else {
+      console.log(chalk.dim(`  To clean up later: a1 remove ${sessionName}`));
+    }
 
     process.exit(exitCode);
   } catch (error) {
