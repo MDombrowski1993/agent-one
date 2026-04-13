@@ -33,7 +33,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MDombrowski1993/cli.git"
+    "url": "git+https://github.com/MDombrowski1993/agent-one.git"
   },
   "dependencies": {
     "chalk": "^5.3.0",
