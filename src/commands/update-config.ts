@@ -2,78 +2,101 @@ import inquirer from 'inquirer';
 import path from 'path';
 import fs from 'fs-extra';
 import chalk from 'chalk';
-import { A1RcFile, CliTool } from '../config/types.js';
-import { resolveProject, writeRc, readRcAt } from '../config/manager.js';
-import { A1_RC_FILENAME, defaultSessionsBase } from '../config/resolver.js';
-import { expandPath } from '../utils/validation.js';
+import { Config, CliTool } from '../config/types.js';
+import { saveConfig, configExists, loadConfig } from '../config/manager.js';
+import { isGitRepo, expandPath } from '../utils/validation.js';
 
 export async function updateConfigCommand(): Promise<void> {
-  const resolved = await resolveProject();
-  if (!resolved || !resolved.rcPath || !resolved.rc) {
-    console.log(
-      chalk.yellow('\nNo ') +
-        chalk.cyan(A1_RC_FILENAME) +
-        chalk.yellow(' found walking up from ') +
-        chalk.white(process.cwd()) +
-        chalk.yellow('. Run ') +
-        chalk.cyan('a1 init') +
-        chalk.yellow(' first.')
-    );
+  // Check if initialized
+  if (!(await configExists())) {
+    console.log(chalk.yellow('\nNot initialized yet. Run ') + chalk.cyan('a1 init') + chalk.yellow(' first.'));
     return;
   }
 
-  const { projectRoot, rcPath } = resolved;
-  const currentRc = (await readRcAt(projectRoot)) ?? resolved.rc;
-  const defaultBase = defaultSessionsBase(projectRoot);
-  const currentSessionsBase = currentRc.sessionsBase
-    ? resolveSessionsBaseForDisplay(projectRoot, currentRc.sessionsBase)
-    : defaultBase;
+  // Load current config
+  const currentConfig = await loadConfig();
+  if (!currentConfig) {
+    console.error(chalk.red('Error: Configuration corrupted. Please run "a1 init" again.'));
+    process.exit(1);
+  }
 
   console.log(chalk.cyan(chalk.bold('\nUpdate Configuration\n')));
-  console.log(chalk.dim(`Editing: ${rcPath}`));
   console.log(chalk.dim('Current values are shown as defaults. Press Enter to keep them.\n'));
 
+  // Prompt for configuration with current values as defaults
   const answers = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'projectRoot',
+      message: 'Project root path (git repo or any directory):',
+      default: currentConfig.projectRoot,
+      validate: async (input: string) => {
+        const expanded = expandPath(input);
+        const exists = await fs.pathExists(expanded);
+        if (!exists) {
+          return 'Path must exist';
+        }
+        const stats = await fs.stat(expanded);
+        if (!stats.isDirectory()) {
+          return 'Path must be a directory';
+        }
+        return true;
+      },
+      filter: async (input: string) => {
+        const expanded = expandPath(input);
+        const isGit = await isGitRepo(expanded);
+        if (isGit) {
+          console.log(chalk.green('  ✓ Git repository detected - sessions will use worktrees'));
+        } else {
+          console.log(chalk.yellow('  ℹ Not a git repo - sessions will use simple directories'));
+        }
+        return expanded;
+      },
+    },
     {
       type: 'list',
       name: 'defaultCli',
       message: 'Default AI CLI tool:',
       choices: [
-        { name: 'claude', value: 'claude' },
         { name: 'cursor-agent', value: 'cursor-agent' },
+        { name: 'claude', value: 'claude' },
         { name: 'codex', value: 'codex' },
         { name: 'gemini', value: 'gemini' },
       ],
-      default: currentRc.defaultCli,
+      default: currentConfig.defaultCli,
     },
     {
       type: 'input',
       name: 'sessionsBase',
-      message:
-        'Sessions base directory:\n  (Isolated workspaces — kept outside the repo to avoid conflicts)',
-      default: currentSessionsBase,
+      message: 'Sessions base directory:\n  (Isolated workspaces - for git repos, kept separate to avoid conflicts)',
+      default: currentConfig.sessionsBase,
+      filter: (input: string) => expandPath(input),
+    },
+    {
+      type: 'input',
+      name: 'aiDirectory',
+      message: 'AI directory (where roles and configurations are stored):',
+      default: currentConfig.aiDirectory,
       filter: (input: string) => expandPath(input),
     },
   ]);
 
-  const nextRc: A1RcFile = {
+  // Create updated config object
+  const config: Config = {
+    projectRoot: answers.projectRoot,
     defaultCli: answers.defaultCli as CliTool,
+    sessionsBase: answers.sessionsBase,
+    aiDirectory: answers.aiDirectory,
   };
-  if (path.resolve(answers.sessionsBase) !== path.resolve(defaultBase)) {
-    nextRc.sessionsBase = answers.sessionsBase;
-  }
 
-  await fs.ensureDir(answers.sessionsBase);
-  await writeRc(projectRoot, nextRc);
+  // Ensure directories exist
+  await fs.ensureDir(config.sessionsBase);
+  await fs.ensureDir(config.aiDirectory);
 
-  console.log(chalk.green(`\n✓ Updated ${rcPath}`));
+  // Save config
+  await saveConfig(config);
+
+  console.log(chalk.green('\n✓ Configuration updated successfully!'));
+  console.log(chalk.dim(`\nConfig location: ~/.config/a1/config.json`));
   console.log(chalk.dim('\nView config with: ') + chalk.cyan('a1 config'));
-}
-
-function resolveSessionsBaseForDisplay(projectRoot: string, p: string): string {
-  if (p.startsWith('~/')) {
-    return path.join(process.env.HOME || process.env.USERPROFILE || '', p.slice(2));
-  }
-  if (path.isAbsolute(p)) return p;
-  return path.resolve(projectRoot, p);
 }
