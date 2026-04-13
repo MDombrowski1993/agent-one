@@ -2,8 +2,14 @@ import inquirer from 'inquirer';
 import path from 'path';
 import fs from 'fs-extra';
 import chalk from 'chalk';
-import { Config, CliTool } from '../config/types.js';
-import { saveConfig, configExists } from '../config/manager.js';
+import { A1RcFile, CliTool } from '../config/types.js';
+import {
+  writeRc,
+  resolveProject,
+  removeLegacyGlobalConfig,
+  getLegacyGlobalConfigPath,
+} from '../config/manager.js';
+import { A1_RC_FILENAME, defaultSessionsBase } from '../config/resolver.js';
 import { isGitRepo, expandPath } from '../utils/validation.js';
 import { printBanner } from '../utils/branding.js';
 
@@ -11,53 +17,47 @@ export async function initCommand(): Promise<void> {
   printBanner();
   console.log(chalk.bold('Welcome to Agent One CLI Setup\n'));
 
-  // Check if already initialized
-  if (await configExists()) {
+  const cwd = process.cwd();
+
+  // Project root is always the directory where init is run.
+  const projectRoot = cwd;
+  const rcPath = path.join(projectRoot, A1_RC_FILENAME);
+
+  // Check if .a1rc.json already exists here
+  if (await fs.pathExists(rcPath)) {
     const { overwrite } = await inquirer.prompt([
       {
         type: 'confirm',
         name: 'overwrite',
-        message: 'Configuration already exists. Do you want to overwrite it?',
+        message: `${A1_RC_FILENAME} already exists at ${projectRoot}. Overwrite?`,
         default: false,
       },
     ]);
-
     if (!overwrite) {
       console.log(chalk.yellow('\nSetup cancelled.'));
       return;
     }
   }
 
+  // Warn about ancestor .a1rc.json (config would be shadowed by this one)
+  const ancestor = await resolveProject(path.dirname(projectRoot));
+  if (ancestor && ancestor.rcPath) {
+    console.log(
+      chalk.yellow(
+        `  ℹ Note: an ancestor ${A1_RC_FILENAME} exists at ${ancestor.rcPath} — this project's config will take precedence within it.\n`
+      )
+    );
+  }
+
+  const isGit = await isGitRepo(projectRoot);
+  if (isGit) {
+    console.log(chalk.green('  ✓ Git repository detected - sessions will use worktrees'));
+  } else {
+    console.log(chalk.yellow('  ℹ Not a git repo - sessions will use simple directories'));
+  }
+
   // Prompt for configuration
   const answers = await inquirer.prompt([
-    {
-      type: 'input',
-      name: 'projectRoot',
-      message: 'Project root path (git repo or any directory):',
-      default: process.cwd(),
-      validate: async (input: string) => {
-        const expanded = expandPath(input);
-        const exists = await fs.pathExists(expanded);
-        if (!exists) {
-          return 'Path must exist';
-        }
-        const stats = await fs.stat(expanded);
-        if (!stats.isDirectory()) {
-          return 'Path must be a directory';
-        }
-        return true;
-      },
-      filter: async (input: string) => {
-        const expanded = expandPath(input);
-        const isGit = await isGitRepo(expanded);
-        if (isGit) {
-          console.log(chalk.green('  ✓ Git repository detected - sessions will use worktrees'));
-        } else {
-          console.log(chalk.yellow('  ℹ Not a git repo - sessions will use simple directories'));
-        }
-        return expanded;
-      },
-    },
     {
       type: 'list',
       name: 'defaultCli',
@@ -73,52 +73,42 @@ export async function initCommand(): Promise<void> {
     {
       type: 'input',
       name: 'sessionsBase',
-      message: 'Sessions base directory:\n  (Isolated workspaces - for git repos, kept separate to avoid conflicts)',
-      default: (answers: { projectRoot: string }) => {
-        // Default to sibling "sessions" directory
-        const projectParent = path.dirname(answers.projectRoot);
-        return path.join(projectParent, 'sessions');
-      },
-      filter: (input: string) => expandPath(input),
-    },
-    {
-      type: 'input',
-      name: 'aiDirectory',
-      message: 'AI directory (where roles and configurations are stored):',
-      default: async (answers: { projectRoot: string }) => {
-        // Check if .ai exists in current working directory
-        const cwdAiDir = path.join(process.cwd(), '.ai');
-        const cwdAiExists = await fs.pathExists(cwdAiDir);
-
-        if (cwdAiExists) {
-          console.log(chalk.green('  ✓ Found existing .ai directory in current location'));
-          return cwdAiDir;
-        }
-
-        // Otherwise default to project root
-        return path.join(answers.projectRoot, '.ai');
-      },
+      message:
+        'Sessions base directory:\n  (Isolated workspaces — kept outside the repo to avoid conflicts)',
+      default: defaultSessionsBase(projectRoot),
       filter: (input: string) => expandPath(input),
     },
   ]);
 
-  // Create config object
-  const config: Config = {
-    projectRoot: answers.projectRoot,
+  // Only persist sessionsBase if it differs from the default — keeps .a1rc.json lean
+  const defaultBase = defaultSessionsBase(projectRoot);
+  const rc: A1RcFile = {
     defaultCli: answers.defaultCli as CliTool,
-    sessionsBase: answers.sessionsBase,
-    aiDirectory: answers.aiDirectory,
   };
+  if (path.resolve(answers.sessionsBase) !== path.resolve(defaultBase)) {
+    rc.sessionsBase = answers.sessionsBase;
+  }
 
-  // Ensure directories exist
-  await fs.ensureDir(config.sessionsBase);
-  await fs.ensureDir(config.aiDirectory);
+  // Ensure on-disk directories exist
+  const sessionsBase = answers.sessionsBase;
+  const aiDirectory = path.join(projectRoot, '.ai');
+  await fs.ensureDir(sessionsBase);
+  await fs.ensureDir(aiDirectory);
 
-  // Save config
-  await saveConfig(config);
+  // Write .a1rc.json
+  await writeRc(projectRoot, rc);
 
-  console.log(chalk.green('\n✓ Configuration saved successfully!'));
-  console.log(chalk.dim(`\nConfig location: ~/.config/a1/config.json`));
+  // Clean up legacy global config
+  const removed = await removeLegacyGlobalConfig();
+
+  console.log(chalk.green(`\n✓ Wrote ${rcPath}`));
+  console.log(chalk.dim(`  aiDirectory: ${aiDirectory}`));
+  console.log(chalk.dim(`  sessionsBase: ${sessionsBase}`));
+  if (removed) {
+    console.log(
+      chalk.dim(`  Removed legacy config at ${getLegacyGlobalConfigPath()}`)
+    );
+  }
 
   console.log(chalk.bold('\nGet started:\n'));
 
