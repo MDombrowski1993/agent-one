@@ -1,31 +1,22 @@
 import chalk from 'chalk';
-import { loadConfig, resolveProject } from '../config/manager.js';
-import { A1_RC_FILENAME } from '../config/resolver.js';
+import { loadConfig, configExists } from '../config/manager.js';
 
 export async function configCommand(): Promise<void> {
-  const resolved = await resolveProject();
-
-  if (!resolved || !resolved.rc) {
-    console.log(
-      chalk.yellow('No ') +
-        chalk.cyan(A1_RC_FILENAME) +
-        chalk.yellow(' found walking up from ') +
-        chalk.white(process.cwd()) +
-        chalk.yellow('. Run ') +
-        chalk.cyan('a1 init') +
-        chalk.yellow(' to create one.')
-    );
+  // Check if initialized
+  if (!(await configExists())) {
+    console.log(chalk.yellow('Not initialized yet. Run ') + chalk.cyan('a1 init') + chalk.yellow(' to get started.'));
     return;
   }
 
+  // Load and display config
   const config = await loadConfig();
   if (!config) {
-    console.error(chalk.red('Error: failed to resolve configuration.'));
+    console.error(chalk.red('Error: Configuration corrupted. Please run "a1 init" again.'));
     process.exit(1);
   }
 
   console.log(chalk.cyan(chalk.bold('\nAgent One Configuration\n')));
-  console.log(chalk.dim('Config file: ') + chalk.white(resolved.rcPath ?? '(none)') + '\n');
+  console.log(chalk.dim('Config file: ') + chalk.white('~/.config/a1/config.json\n'));
 
   console.log(chalk.green('Project Root:'));
   console.log(chalk.dim('  ') + config.projectRoot);
