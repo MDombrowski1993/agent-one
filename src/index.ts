@@ -22,6 +22,7 @@ import { updateSkillCommand } from './commands/update-skill.js';
 import { listSkillsCommand } from './commands/list-skills.js';
 import { assignSkillCommand } from './commands/assign-skill.js';
 import { listRolesCommand } from './commands/list-roles.js';
+import { setupWorktreeCommand } from './commands/setup-worktree.js';
 
 // Get package.json version
 const __filename = fileURLToPath(import.meta.url);
@@ -72,6 +73,14 @@ program
   .option('--manifest <path>', 'Skip wizard and load manifest from file')
   .action(async (options) => {
     await createSwarmCommand(options);
+  });
+
+// a1 setup-worktree [path]
+program
+  .command('setup-worktree [path]')
+  .description('Copy configured env files and run the setup command in a worktree (defaults to cwd)')
+  .action(async (worktreePath?: string) => {
+    await setupWorktreeCommand(worktreePath);
   });
 
 // a1 remove <session-name>

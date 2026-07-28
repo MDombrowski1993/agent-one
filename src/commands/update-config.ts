@@ -79,7 +79,25 @@ export async function updateConfigCommand(): Promise<void> {
       default: currentConfig.aiDirectory,
       filter: (input: string) => expandPath(input),
     },
+    {
+      type: 'input',
+      name: 'worktreeCopyFiles',
+      message: 'Files to copy into new worktrees (comma-separated, relative to project root — leave empty to disable):',
+      default: (currentConfig.worktreeSetup?.copyFiles ?? []).join(', '),
+    },
+    {
+      type: 'input',
+      name: 'worktreeCommand',
+      message: 'Setup command to run in new worktrees (leave empty to disable):',
+      default: currentConfig.worktreeSetup?.command ?? '',
+    },
   ]);
+
+  const copyFiles = String(answers.worktreeCopyFiles || '')
+    .split(',')
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+  const worktreeCommand = String(answers.worktreeCommand || '').trim();
 
   // Create updated config object
   const config: Config = {
@@ -87,6 +105,14 @@ export async function updateConfigCommand(): Promise<void> {
     defaultCli: answers.defaultCli as CliTool,
     sessionsBase: answers.sessionsBase,
     aiDirectory: answers.aiDirectory,
+    ...(copyFiles.length > 0 || worktreeCommand
+      ? {
+          worktreeSetup: {
+            ...(copyFiles.length > 0 ? { copyFiles } : {}),
+            ...(worktreeCommand ? { command: worktreeCommand } : {}),
+          },
+        }
+      : {}),
   };
 
   // Ensure directories exist

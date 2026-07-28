@@ -353,6 +353,34 @@ This:
 
 After the CLI exits, A1 shows next steps for pushing changes or cleaning up.
 
+### Worktree Setup (Run the Worktree Locally)
+
+Fresh worktrees don't include gitignored files (like `.env.local`) and haven't run install/codegen steps, so they aren't runnable out of the box. Configure a worktree setup to fix that automatically:
+
+```json
+// ~/.config/a1/config.json
+{
+  "worktreeSetup": {
+    "copyFiles": ["apps/frontend/.env.local"],
+    "command": "pnpm run refresh"
+  }
+}
+```
+
+- `copyFiles` — paths (relative to `projectRoot`) copied from your main checkout into every new worktree
+- `command` — run at the worktree root after files are copied
+
+This runs automatically after `a1 create` and `a1 create-swarm` create their worktree, so you can `cd` into the worktree and run the app directly — no need to end the agent session or switch branches in your main checkout. Configure it via `a1 init` / `a1 update-config`.
+
+For a worktree that already exists (or to re-run after a failure):
+
+```bash
+a1 setup-worktree              # setup the current directory
+a1 setup-worktree <path>       # setup a specific worktree
+```
+
+Setup failures are warnings — they never block session creation.
+
 ### Managing Sessions
 
 ```bash
@@ -437,6 +465,7 @@ Each agent sees what the previous agents did and picks up where they left off. H
 | `a1 remove <session>` | Remove a session |
 | `a1 list` | List active sessions |
 | `a1 create-swarm <name>` | Create a multi-agent swarm |
+| `a1 setup-worktree [path]` | Copy env files + run setup command in a worktree |
 
 ### Roles
 
@@ -527,7 +556,11 @@ A1 stores its configuration at `~/.config/a1/config.json`:
   "projectRoot": "/path/to/your/project",
   "defaultCli": "claude",
   "sessionsBase": "/path/to/sessions",
-  "aiDirectory": "/path/to/your/project/.ai"
+  "aiDirectory": "/path/to/your/project/.ai",
+  "worktreeSetup": {
+    "copyFiles": ["apps/frontend/.env.local"],
+    "command": "pnpm run refresh"
+  }
 }
 ```
 
@@ -537,6 +570,7 @@ A1 stores its configuration at `~/.config/a1/config.json`:
 | `defaultCli` | Default AI CLI (`claude`, `cursor-agent`, `codex`, `gemini`) |
 | `sessionsBase` | Where isolated session workspaces are created |
 | `aiDirectory` | Where roles, skills, and MCP configs are stored |
+| `worktreeSetup` | Optional — files to copy and command to run in new worktrees so they're runnable as-is |
 
 View with `a1 config`. Update with `a1 update-config`.
 

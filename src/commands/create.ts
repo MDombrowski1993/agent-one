@@ -4,6 +4,7 @@ import { loadConfig } from '../config/manager.js';
 import { CliTool } from '../config/types.js';
 import { validateBranchName } from '../utils/validation.js';
 import { createSession, removeSession } from '../services/session.js';
+import { setupWorktree } from '../services/worktree-setup.js';
 import { roleExists } from '../services/role.js';
 import { composeRoleContext } from '../services/context-composer.js';
 import { launchCLI } from '../services/cli-launcher.js';
@@ -66,6 +67,8 @@ export async function createCommand(
 
     if (isGit) {
       console.log(chalk.green(`✓ Git worktree created at: ${sessionPath}`));
+      // Copy env files and run setup so the worktree is runnable as-is
+      await setupWorktree(config, sessionPath);
     } else {
       console.log(chalk.green(`✓ Session directory created at: ${sessionPath}`));
     }

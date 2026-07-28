@@ -100,7 +100,25 @@ export async function initCommand(): Promise<void> {
       },
       filter: (input: string) => expandPath(input),
     },
+    {
+      type: 'input',
+      name: 'worktreeCopyFiles',
+      message: 'Files to copy into new worktrees (comma-separated, relative to project root, e.g. apps/frontend/.env.local — leave empty to skip):',
+      default: '',
+    },
+    {
+      type: 'input',
+      name: 'worktreeCommand',
+      message: 'Setup command to run in new worktrees (e.g. pnpm run refresh — leave empty to skip):',
+      default: '',
+    },
   ]);
+
+  const copyFiles = String(answers.worktreeCopyFiles || '')
+    .split(',')
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+  const worktreeCommand = String(answers.worktreeCommand || '').trim();
 
   // Create config object
   const config: Config = {
@@ -108,6 +126,14 @@ export async function initCommand(): Promise<void> {
     defaultCli: answers.defaultCli as CliTool,
     sessionsBase: answers.sessionsBase,
     aiDirectory: answers.aiDirectory,
+    ...(copyFiles.length > 0 || worktreeCommand
+      ? {
+          worktreeSetup: {
+            ...(copyFiles.length > 0 ? { copyFiles } : {}),
+            ...(worktreeCommand ? { command: worktreeCommand } : {}),
+          },
+        }
+      : {}),
   };
 
   // Ensure directories exist

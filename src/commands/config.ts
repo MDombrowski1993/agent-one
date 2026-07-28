@@ -34,5 +34,16 @@ export async function configCommand(): Promise<void> {
   console.log(chalk.dim('  ') + config.aiDirectory);
   console.log();
 
+  if (config.worktreeSetup) {
+    console.log(chalk.green('Worktree Setup:'));
+    if (config.worktreeSetup.copyFiles?.length) {
+      console.log(chalk.dim('  Copy files: ') + config.worktreeSetup.copyFiles.join(', '));
+    }
+    if (config.worktreeSetup.command) {
+      console.log(chalk.dim('  Command:    ') + config.worktreeSetup.command);
+    }
+    console.log();
+  }
+
   console.log(chalk.dim('To update configuration, run: ') + chalk.cyan('a1 update-config'));
 }

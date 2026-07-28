@@ -8,6 +8,7 @@ import { getAgentDir, getSwarmDir, saveManifest } from './manifest.js';
 import { createSwarmWorktree } from './worktree.js';
 import { buildPrompt } from './prompt-builder.js';
 import { composeRoleContext } from '../services/context-composer.js';
+import { setupWorktree } from '../services/worktree-setup.js';
 
 export class SwarmOrchestrator {
   private config: Config;
@@ -38,6 +39,9 @@ export class SwarmOrchestrator {
     );
     console.log(chalk.green(`  ✓ ${this.worktreePath}`));
     console.log(chalk.green(`  ✓ Branch: ${this.manifest.integration_branch}\n`));
+
+    // Copy env files and run setup so the worktree is runnable as-is
+    await setupWorktree(this.config, this.worktreePath);
 
     // Save manifest and create agent directories inside the worktree
     await saveManifest(this.worktreePath, this.manifest);
