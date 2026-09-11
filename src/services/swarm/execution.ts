@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import { Config } from '../../config/types.js';
 import { composeRoleContext } from '../context-composer.js';
 import { launchCLI } from '../cli-launcher.js';
+import { printLoadedSkills } from '../../utils/skill-display.js';
 import {
   loadPreviousHandoffs,
   createHandoffTemplate,
@@ -32,10 +33,7 @@ export async function executeSwarmRoles(
     try {
       // Compose role context (includes skills)
       const composed = await composeRoleContext(config, roleName);
-
-      if (composed.skillMarkdowns.length > 0) {
-        console.log(chalk.green(`  ✓ ${composed.skillMarkdowns.length} skill(s) loaded`));
-      }
+      printLoadedSkills(composed.skills);
 
       // Build swarm-specific context
       const context = await buildSwarmContext(

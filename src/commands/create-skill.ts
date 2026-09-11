@@ -4,7 +4,13 @@ import path from 'path';
 import fs from 'fs-extra';
 import { loadConfig } from '../config/manager.js';
 import { CliTool, Config } from '../config/types.js';
-import { createSkill, getSkillPath, getSkillMCPRefsPath, skillExists } from '../services/skill/service.js';
+import {
+  createSkill,
+  getSkillPath,
+  getSkillMCPRefsPath,
+  skillExists,
+  setSkillAlwaysOn,
+} from '../services/skill/service.js';
 import { discoverAllMCPServers } from '../services/mcp/manager.js';
 import { launchCLI } from '../services/cli-launcher.js';
 
@@ -60,9 +66,16 @@ export async function createSkillCommand(options: CreateSkillOptions = {}): Prom
         return true;
       },
     },
+    {
+      type: 'confirm',
+      name: 'alwaysOn',
+      message:
+        'Always on? (loaded into every launch, no matter which role is used)',
+      default: false,
+    },
   ]);
 
-  const { skillName, description } = answers;
+  const { skillName, description, alwaysOn } = answers;
 
   // Check if skill already exists
   if (await skillExists(config, skillName, isGlobal)) {
@@ -77,6 +90,13 @@ export async function createSkillCommand(options: CreateSkillOptions = {}): Prom
     const skillPath = await createSkill(config, skillName, description, isGlobal);
     const scope = isGlobal ? 'Global skill' : 'Skill';
     console.log(chalk.green(`\n✓ ${scope} file created at: ${skillPath}`));
+
+    if (alwaysOn) {
+      await setSkillAlwaysOn(config, skillName, isGlobal, true);
+      console.log(
+        chalk.yellow('✓ Marked always on — every role inherits this skill')
+      );
+    }
 
     // Offer to associate MCP servers
     const allServers = await discoverAllMCPServers(config);

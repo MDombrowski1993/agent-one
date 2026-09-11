@@ -6,9 +6,10 @@ import { validateBranchName } from '../utils/validation.js';
 import { createSession, removeSession } from '../services/session.js';
 import { setupWorktree } from '../services/worktree-setup.js';
 import { roleExists } from '../services/role.js';
-import { composeRoleContext } from '../services/context-composer.js';
+import { composeRoleContext, composeAlwaysOnContext } from '../services/context-composer.js';
 import { launchCLI } from '../services/cli-launcher.js';
 import { printBanner } from '../utils/branding.js';
+import { printLoadedSkills } from '../utils/skill-display.js';
 
 interface CreateOptions {
   role?: string;
@@ -39,7 +40,7 @@ export async function createCommand(
   console.log(chalk.cyan(`Creating session: ${sessionName}`));
 
   try {
-    // Load role context if specified
+    // Load role context if specified; always-on skills load either way
     let roleContext: string | undefined;
 
     if (options.role) {
@@ -56,10 +57,11 @@ export async function createCommand(
       const composed = await composeRoleContext(config, options.role);
       roleContext = composed.composedPrompt;
       console.log(chalk.green('✓ Role context loaded'));
-
-      if (composed.skillMarkdowns.length > 0) {
-        console.log(chalk.green(`✓ ${composed.skillMarkdowns.length} skill(s) loaded`));
-      }
+      printLoadedSkills(composed.skills);
+    } else {
+      const composed = await composeAlwaysOnContext(config);
+      roleContext = composed.composedPrompt || undefined;
+      printLoadedSkills(composed.skills);
     }
 
     // Create session

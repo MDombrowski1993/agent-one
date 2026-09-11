@@ -7,7 +7,11 @@ import {
   RoleSkillRefs,
   DiscoveredSkill,
   ResolvedSkill,
+  SkillMeta,
+  EffectiveSkills,
 } from './types.js';
+
+const DEFAULT_SKILL_META: SkillMeta = { alwaysOn: false };
 
 export function getGlobalSkillsPath(): string {
   return path.join(homedir(), '.config', 'a1', 'global-skills');
@@ -43,6 +47,22 @@ export function getSkillMCPRefsPath(
   }
 
   return path.join(config.aiDirectory, 'skills', name, 'mcp.json');
+}
+
+export function getSkillMetaPath(
+  config: Config | null,
+  name: string,
+  isGlobal: boolean
+): string {
+  if (isGlobal) {
+    return path.join(getGlobalSkillsPath(), name, 'skill.json');
+  }
+
+  if (!config) {
+    throw new Error('Config is required for project-level skills');
+  }
+
+  return path.join(config.aiDirectory, 'skills', name, 'skill.json');
 }
 
 export function getRoleSkillsPath(
@@ -131,6 +151,47 @@ export async function loadSkillMCPRefs(
   }
 
   return [];
+}
+
+export async function loadSkillMeta(
+  config: Config | null,
+  name: string,
+  isGlobal?: boolean
+): Promise<SkillMeta> {
+  if (isGlobal !== undefined) {
+    return readSkillMeta(getSkillMetaPath(config, name, isGlobal));
+  }
+
+  // Project-first resolution
+  if (config) {
+    const projectPath = getSkillMetaPath(config, name, false);
+    if (await fs.pathExists(getSkillPath(config, name, false))) {
+      return readSkillMeta(projectPath);
+    }
+  }
+
+  return readSkillMeta(getSkillMetaPath(null, name, true));
+}
+
+export async function setSkillAlwaysOn(
+  config: Config | null,
+  name: string,
+  isGlobal: boolean,
+  alwaysOn: boolean
+): Promise<void> {
+  const metaPath = getSkillMetaPath(config, name, isGlobal);
+  const meta = { ...(await readSkillMeta(metaPath)), alwaysOn };
+
+  if (isDefaultMeta(meta)) {
+    // Nothing worth persisting — keep the skill directory clean
+    if (await fs.pathExists(metaPath)) {
+      await fs.remove(metaPath);
+    }
+    return;
+  }
+
+  await fs.ensureDir(path.dirname(metaPath));
+  await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
 }
 
 export async function loadRoleSkillRefs(
@@ -262,6 +323,65 @@ export async function discoverAllSkills(
   return [...projectSkills, ...globalSkills];
 }
 
+/**
+ * Skills keyed by name with project entries shadowing global ones, matching the
+ * project-first resolution used when loading a skill's markdown.
+ */
+export async function discoverEffectiveSkills(
+  config: Config | null
+): Promise<Map<string, DiscoveredSkill>> {
+  const allSkills = await discoverAllSkills(config);
+  const byName = new Map<string, DiscoveredSkill>();
+
+  // discoverAllSkills returns project skills first, so keep the first entry seen
+  for (const skill of allSkills) {
+    if (!byName.has(skill.name)) {
+      byName.set(skill.name, skill);
+    }
+  }
+
+  return byName;
+}
+
+export async function discoverAlwaysOnSkills(
+  config: Config | null
+): Promise<DiscoveredSkill[]> {
+  const byName = await discoverEffectiveSkills(config);
+  return [...byName.values()].filter((s) => s.alwaysOn);
+}
+
+/**
+ * Merge always-on skills with a role's assigned skills. Always-on skills load
+ * first; role assignments that duplicate them are dropped.
+ */
+export async function resolveEffectiveSkills(
+  config: Config | null,
+  roleSkillNames: string[]
+): Promise<EffectiveSkills> {
+  const alwaysOnSkills = await discoverAlwaysOnSkills(config);
+  const alwaysOnNames = alwaysOnSkills.map((s) => s.name);
+
+  const names = [...alwaysOnNames];
+  const dedupedNames: string[] = [];
+
+  for (const name of roleSkillNames) {
+    if (names.includes(name)) {
+      if (alwaysOnNames.includes(name)) {
+        dedupedNames.push(name);
+      }
+      continue;
+    }
+    names.push(name);
+  }
+
+  return {
+    names,
+    alwaysOnNames,
+    roleNames: roleSkillNames,
+    dedupedNames,
+  };
+}
+
 export async function resolveSkill(
   config: Config | null,
   name: string
@@ -277,6 +397,24 @@ export async function resolveSkill(
 }
 
 // --- Internal helpers ---
+
+async function readSkillMeta(metaPath: string): Promise<SkillMeta> {
+  if (!(await fs.pathExists(metaPath))) {
+    return { ...DEFAULT_SKILL_META };
+  }
+
+  try {
+    const data = await fs.readFile(metaPath, 'utf-8');
+    const parsed = JSON.parse(data) as Partial<SkillMeta>;
+    return { ...DEFAULT_SKILL_META, ...parsed, alwaysOn: parsed.alwaysOn === true };
+  } catch {
+    return { ...DEFAULT_SKILL_META };
+  }
+}
+
+function isDefaultMeta(meta: SkillMeta): boolean {
+  return meta.alwaysOn === DEFAULT_SKILL_META.alwaysOn;
+}
 
 function formatSkillName(name: string): string {
   return name
@@ -324,12 +462,17 @@ async function scanSkillsDirectory(
             }
           }
 
+          const meta = await readSkillMeta(
+            path.join(skillsDir, entry.name, 'skill.json')
+          );
+
           skills.push({
             name: entry.name,
             description,
             scope,
             path: skillPath,
             mcpRefs,
+            alwaysOn: meta.alwaysOn,
           });
         } catch (error) {
           console.warn(`Warning: Could not read skill ${entry.name}: ${error}`);
