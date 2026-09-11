@@ -9,6 +9,8 @@ import {
 } from '../services/skill/service.js';
 import fs from 'fs-extra';
 import path from 'path';
+import { alwaysOnTag, withAlwaysOnTag } from '../utils/skill-display.js';
+import { resolveEffectiveSkills } from '../services/skill/service.js';
 
 export async function assignSkillCommand(): Promise<void> {
   const config = await loadConfig();
@@ -50,7 +52,23 @@ export async function assignSkillCommand(): Promise<void> {
   // Load current skills for this role
   const currentSkills = await loadRoleSkillRefs(config, roleName);
 
-  console.log(chalk.cyan(`\nCurrent skills for "${roleName}": ${currentSkills.length > 0 ? currentSkills.join(', ') : '(none)'}\n`));
+  console.log(chalk.cyan(`\nCurrent skills for "${roleName}": ${currentSkills.length > 0 ? currentSkills.join(', ') : '(none)'}`));
+
+  // Always-on skills load for every role — say so before the checkbox
+  const alwaysOnSkills = allSkills.filter((s) => s.alwaysOn);
+  if (alwaysOnSkills.length > 0) {
+    console.log(
+      chalk.yellow(
+        `\nAlways on (loaded for every role): ${alwaysOnSkills.map((s) => s.name).join(', ')}`
+      )
+    );
+    console.log(
+      chalk.dim(
+        'Assigning them here is optional — they load either way, and duplicates are deduped.'
+      )
+    );
+  }
+  console.log();
 
   // Select skills (checkbox with current ones pre-checked)
   const { selectedSkills } = await inquirer.prompt([
@@ -59,7 +77,7 @@ export async function assignSkillCommand(): Promise<void> {
       name: 'selectedSkills',
       message: 'Select skills to assign:',
       choices: allSkills.map((s) => ({
-        name: `${s.name} (${s.scope}) - ${s.description}`,
+        name: withAlwaysOnTag(`${s.name} (${s.scope}) - ${s.description}`, s),
         value: s.name,
         checked: currentSkills.includes(s.name),
       })),
@@ -73,9 +91,19 @@ export async function assignSkillCommand(): Promise<void> {
 
   console.log(chalk.green(`\n✓ Updated skills for role "${roleName}": ${selectedSkills.length > 0 ? selectedSkills.join(', ') : '(none)'}`));
 
-  // Show MCP summary
+  // Show what the role will actually load (assigned + always-on, deduped)
+  const effective = await resolveEffectiveSkills(config, selectedSkills);
+  if (effective.names.length > selectedSkills.length) {
+    console.log(
+      chalk.dim(`  Loads at launch: ${effective.names.join(', ')} `) +
+        alwaysOnTag() +
+        chalk.dim(` → ${effective.alwaysOnNames.join(', ')}`)
+    );
+  }
+
+  // Show MCP summary — always-on skills bring their MCP servers too
   const skillsWithMCP = allSkills.filter(
-    (s) => selectedSkills.includes(s.name) && s.mcpRefs.length > 0
+    (s) => effective.names.includes(s.name) && s.mcpRefs.length > 0
   );
 
   if (skillsWithMCP.length > 0) {

@@ -3,8 +3,9 @@ import { loadConfig, configExists } from '../config/manager.js';
 import { CliTool } from '../config/types.js';
 import { launchCLI } from '../services/cli-launcher.js';
 import { roleExists } from '../services/role.js';
-import { composeRoleContext } from '../services/context-composer.js';
+import { composeRoleContext, composeAlwaysOnContext } from '../services/context-composer.js';
 import { printBanner } from '../utils/branding.js';
+import { printLoadedSkills } from '../utils/skill-display.js';
 
 interface DefaultCommandOptions {
   role?: string;
@@ -31,7 +32,7 @@ export async function defaultCommand(options: DefaultCommandOptions = {}): Promi
 
   const cliTool: CliTool = (options.cli as CliTool) || config.defaultCli;
 
-  // Load role context if specified
+  // Load role context if specified; always-on skills load either way
   let roleContext: string | undefined;
 
   if (options.role) {
@@ -43,12 +44,12 @@ export async function defaultCommand(options: DefaultCommandOptions = {}): Promi
     const composed = await composeRoleContext(config, options.role);
     roleContext = composed.composedPrompt;
     console.log(chalk.cyan(`Launching ${cliTool} with role "${options.role}" in current directory...`));
-
-    if (composed.skillMarkdowns.length > 0) {
-      console.log(chalk.green(`✓ ${composed.skillMarkdowns.length} skill(s) loaded`));
-    }
+    printLoadedSkills(composed.skills);
   } else {
+    const composed = await composeAlwaysOnContext(config);
+    roleContext = composed.composedPrompt || undefined;
     console.log(chalk.cyan(`Launching ${cliTool} in current directory...`));
+    printLoadedSkills(composed.skills);
   }
 
   console.log(chalk.dim('─'.repeat(50)));

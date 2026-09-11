@@ -22,6 +22,7 @@ A1 sits on top of your existing AI coding tools (Claude Code, Cursor Agent, Code
 - [How It Works](#how-it-works)
 - [Roles](#roles)
 - [Skills](#skills)
+  - [Always-On Skills](#always-on-skills)
 - [MCP Servers](#mcp-servers)
 - [Putting It All Together](#putting-it-all-together)
 - [Sessions](#sessions)
@@ -121,12 +122,15 @@ When you run `a1 launch --role bug-catcher`, here's what happens:
 
 1. **Load Role** — reads `role.md` for the "bug-catcher" role
 2. **Resolve Skills** — reads `skills.json` to find assigned skills (e.g. `["look-for-bug"]`)
-3. **Load Skills** — reads each skill's `skill.md` for instructions
-4. **Resolve MCP Servers** — reads each skill's `mcp.json` for tool references (e.g. `["linear"]`)
-5. **Compose Prompt** — combines role + skills into a structured prompt
-6. **Launch CLI** — passes the composed prompt to your AI CLI (e.g. Claude Code)
+3. **Merge Always-On Skills** — adds every skill marked always on, deduping anything the role already assigned
+4. **Load Skills** — reads each skill's `skill.md` for instructions
+5. **Resolve MCP Servers** — reads each skill's `mcp.json` for tool references (e.g. `["linear"]`)
+6. **Compose Prompt** — combines role + skills into a structured prompt
+7. **Launch CLI** — passes the composed prompt to your AI CLI (e.g. Claude Code)
 
 The agent receives all this context as its initial prompt and starts working with full awareness of its role, capabilities, and available tools.
+
+Always-on skills load even when no role is given, so `a1 launch` and `a1 create <name>` without `--role` still carry your baseline instructions.
 
 ---
 
@@ -194,7 +198,8 @@ During creation, you can optionally associate MCP servers with the skill. An AI 
 ```
 .ai/skills/look-for-bug/
 ├── skill.md         # Skill instructions (markdown)
-└── mcp.json         # MCP server references: ["linear"] (optional)
+├── mcp.json         # MCP server references: ["linear"] (optional)
+└── skill.json       # Skill metadata: {"alwaysOn": true} (optional)
 ```
 
 A `skill.md` typically includes:
@@ -204,6 +209,25 @@ A `skill.md` typically includes:
 - **When to Use** — trigger conditions
 - **Guidelines** — best practices and constraints
 
+### Always-On Skills
+
+Some skills aren't optional — commit conventions, security guardrails, house style. Mark a skill **always on** and it loads into every launch, whatever role is (or isn't) in play.
+
+```bash
+a1 create-skill        # answer yes to "Always on?"
+a1 update-skill        # choose "Turn on/off always on"
+```
+
+An always-on skill is stored as `{"alwaysOn": true}` in the skill's `skill.json`, and it applies to:
+
+- `a1 launch` and `a1 launch --role <role>`
+- `a1 create <session-name>`, with or without `--role`
+- every agent in `a1 create-swarm`
+
+Always-on skills load first, ahead of the role's own skills, and their MCP servers are resolved the same way. Marked with `⚡` in `a1 list-skills`, `a1 list-roles`, and at launch time.
+
+Scope follows the usual rule: a project skill shadows a global skill of the same name, so a project `skill.json` decides whether that name is always on.
+
 ### Assigning Skills to Roles
 
 ```bash
@@ -212,13 +236,15 @@ a1 assign-skill
 
 This shows a list of your roles, lets you pick one, then presents a checklist of all available skills. Check the ones this role should have.
 
+Always-on skills are tagged `[⚡ always on]` in that checklist. You can still assign one to a role — it just doesn't change anything, since the skill loads regardless and duplicates are deduped when the prompt is composed.
+
 Skills are also offered during `a1 create-role` if any exist.
 
 ### Managing Skills
 
 ```bash
-a1 list-skills         # See all skills and their MCP associations
-a1 update-skill        # Edit skill.md or manage MCP references
+a1 list-skills         # See all skills, their MCP associations, and always-on flags
+a1 update-skill        # Edit skill.md, manage MCP references, or toggle always on
 ```
 
 ### Scope
@@ -324,10 +350,16 @@ When launched, the agent receives a composed prompt like this:
 ## SKILLS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+[Skill: house-rules — skill.md content]   ← always-on skills come first
+
+---
+
 [Skill: look-for-bug — skill.md content]
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
+
+Without `--role`, the role block is omitted and the prompt is just the `## SKILLS` section with the always-on skills.
 
 ---
 
@@ -482,8 +514,8 @@ Each agent sees what the previous agents did and picks up where they left off. H
 |---------|-------------|
 | `a1 create-skill` | Create a new skill (interactive) |
 | `a1 create-skill -g` | Create a global skill |
-| `a1 update-skill` | Edit skill or manage MCP refs |
-| `a1 list-skills` | List all skills and MCP associations |
+| `a1 update-skill` | Edit skill, manage MCP refs, or toggle always on |
+| `a1 list-skills` | List all skills, MCP associations, and always-on flags |
 | `a1 assign-skill` | Assign skills to a role |
 
 ### MCP Servers

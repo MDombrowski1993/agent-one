@@ -1,7 +1,11 @@
 import chalk from 'chalk';
 import { loadConfig } from '../config/manager.js';
 import { discoverAllRoles } from '../services/role.js';
-import { loadRoleSkillRefs } from '../services/skill/service.js';
+import {
+  loadRoleSkillRefs,
+  discoverAlwaysOnSkills,
+} from '../services/skill/service.js';
+import { alwaysOnTag } from '../utils/skill-display.js';
 
 export async function listRolesCommand(): Promise<void> {
   const config = await loadConfig();
@@ -11,6 +15,15 @@ export async function listRolesCommand(): Promise<void> {
     console.log(chalk.yellow('No roles found.'));
     console.log(chalk.dim('\nCreate one with: a1 create-role'));
     return;
+  }
+
+  const alwaysOnSkills = await discoverAlwaysOnSkills(config);
+  if (alwaysOnSkills.length > 0) {
+    console.log(
+      `\n${alwaysOnTag()} ${chalk.dim('inherited by every role:')} ${chalk.dim(
+        alwaysOnSkills.map((s) => s.name).join(', ')
+      )}`
+    );
   }
 
   const projectRoles = allRoles.filter((r) => r.scope === 'project');

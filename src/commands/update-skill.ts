@@ -8,6 +8,8 @@ import {
   getSkillPath,
   getSkillMCPRefsPath,
   loadSkillMCPRefs,
+  loadSkillMeta,
+  setSkillAlwaysOn,
 } from '../services/skill/service.js';
 import { discoverAllMCPServers as discoverMCP } from '../services/mcp/manager.js';
 import { launchCLI } from '../services/cli-launcher.js';
@@ -95,6 +97,11 @@ export async function updateSkillCommand(options: UpdateSkillOptions = {}): Prom
   console.log(chalk.cyan(chalk.bold(`\nUpdate ${skillScope} Skill: ${skillName}\n`)));
   console.log(chalk.dim(`Location: ${skillPath!}\n`));
 
+  const { alwaysOn } = await loadSkillMeta(config, skillName!, actualIsGlobal!);
+  console.log(
+    chalk.dim(`Always on: ${alwaysOn ? chalk.yellow('yes') : 'no'}\n`)
+  );
+
   // Ask what to update
   const { updateType } = await inquirer.prompt([
     {
@@ -104,12 +111,36 @@ export async function updateSkillCommand(options: UpdateSkillOptions = {}): Prom
       choices: [
         { name: 'Edit skill.md (with AI assistance)', value: 'markdown' },
         { name: 'Manage MCP server references', value: 'mcp' },
+        {
+          name: alwaysOn
+            ? 'Turn off "always on" (roles will only load it if assigned)'
+            : 'Turn on "always on" (loaded into every launch)',
+          value: 'alwaysOn',
+        },
       ],
     },
   ]);
 
   if (updateType === 'mcp') {
     await updateMCPRefs(config, skillName!, actualIsGlobal!);
+    return;
+  }
+
+  if (updateType === 'alwaysOn') {
+    await setSkillAlwaysOn(config, skillName!, actualIsGlobal!, !alwaysOn);
+    if (alwaysOn) {
+      console.log(
+        chalk.green(
+          `\n✓ "${skillName}" is no longer always on — only roles that assign it will load it`
+        )
+      );
+    } else {
+      console.log(
+        chalk.green(
+          `\n✓ "${skillName}" is now always on — every launch loads it, role or not`
+        )
+      );
+    }
     return;
   }
 

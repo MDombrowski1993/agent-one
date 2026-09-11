@@ -6,6 +6,7 @@ import { CliTool, Config } from '../config/types.js';
 import { createRole, getRolePath, roleExists } from '../services/role.js';
 import { discoverAllSkills, getRoleSkillsPath } from '../services/skill/service.js';
 import { launchCLI } from '../services/cli-launcher.js';
+import { withAlwaysOnTag } from '../utils/skill-display.js';
 import fs from 'fs-extra';
 
 interface CreateRoleOptions {
@@ -83,13 +84,24 @@ export async function createRoleCommand(options: CreateRoleOptions = {}): Promis
     // Offer skill assignment if skills exist
     const allSkills = await discoverAllSkills(config);
     if (allSkills.length > 0) {
+      const alwaysOnSkills = allSkills.filter((s) => s.alwaysOn);
+      if (alwaysOnSkills.length > 0) {
+        console.log(
+          chalk.yellow(
+            `\nAlways on (this role loads them whether or not you check them): ${alwaysOnSkills
+              .map((s) => s.name)
+              .join(', ')}\n`
+          )
+        );
+      }
+
       const { selectedSkills } = await inquirer.prompt([
         {
           type: 'checkbox',
           name: 'selectedSkills',
           message: 'Assign skills to this role (optional):',
           choices: allSkills.map((s) => ({
-            name: `${s.name} (${s.scope}) - ${s.description}`,
+            name: withAlwaysOnTag(`${s.name} (${s.scope}) - ${s.description}`, s),
             value: s.name,
           })),
         },
