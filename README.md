@@ -167,7 +167,7 @@ A `role.md` typically includes:
 
 ```bash
 a1 list-roles          # See all roles and their skills
-a1 update-role         # Edit an existing role with AI assistance
+a1 update-role         # Edit an existing role, or move it between project and global
 ```
 
 ### Scope
@@ -244,12 +244,21 @@ Skills are also offered during `a1 create-role` if any exist.
 
 ```bash
 a1 list-skills         # See all skills, their MCP associations, and always-on flags
-a1 update-skill        # Edit skill.md, manage MCP references, or toggle always on
+a1 update-skill        # Edit skill.md, manage MCP refs, toggle always on, or change scope
 ```
 
 ### Scope
 
 Same as roles — project skills live in `.ai/skills/`, global skills live in `~/.config/a1/global-skills/`. Project takes precedence.
+
+Move a skill between scopes at any time — the whole skill directory (`skill.md`, `mcp.json`, `skill.json`) moves with it:
+
+```bash
+a1 update-skill --skill my-skill --make-global    # project -> global
+a1 update-skill --skill my-skill --make-project   # global -> this project
+```
+
+`a1 update-skill` offers the same move interactively. Roles work the same way with `a1 update-role --role my-role --make-global`.
 
 ---
 
@@ -506,6 +515,7 @@ Each agent sees what the previous agents did and picks up where they left off. H
 | `a1 create-role` | Create a new role (interactive) |
 | `a1 create-role -g` | Create a global role |
 | `a1 update-role` | Update an existing role |
+| `a1 update-role --role <name> --make-global` | Move a role to global (`--make-project` moves it back) |
 | `a1 list-roles` | List all roles and their skills |
 
 ### Skills
@@ -514,7 +524,8 @@ Each agent sees what the previous agents did and picks up where they left off. H
 |---------|-------------|
 | `a1 create-skill` | Create a new skill (interactive) |
 | `a1 create-skill -g` | Create a global skill |
-| `a1 update-skill` | Edit skill, manage MCP refs, or toggle always on |
+| `a1 update-skill` | Edit skill, manage MCP refs, toggle always on, or change scope |
+| `a1 update-skill --skill <name> --make-global` | Move a skill to global (`--make-project` moves it back) |
 | `a1 list-skills` | List all skills, MCP associations, and always-on flags |
 | `a1 assign-skill` | Assign skills to a role |
 

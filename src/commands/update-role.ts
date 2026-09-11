@@ -3,13 +3,15 @@ import chalk from 'chalk';
 import path from 'path';
 import { loadConfig } from '../config/manager.js';
 import { CliTool, Config } from '../config/types.js';
-import { getRolePath, loadRoleContext } from '../services/role.js';
+import { getRolePath, loadRoleContext, moveRole } from '../services/role.js';
 import { launchCLI } from '../services/cli-launcher.js';
 import fs from 'fs-extra';
 
 interface UpdateRoleOptions {
   role?: string;
   global?: boolean;
+  makeGlobal?: boolean;
+  makeProject?: boolean;
 }
 
 export async function updateRoleCommand(options: UpdateRoleOptions = {}): Promise<void> {
@@ -98,6 +100,46 @@ export async function updateRoleCommand(options: UpdateRoleOptions = {}): Promis
   console.log(chalk.cyan(chalk.bold(`\nUpdate ${roleScope} Role: ${roleName}\n`)));
   console.log(chalk.dim(`Location: ${rolePath}\n`));
 
+  // Non-interactive scope change
+  if (options.makeGlobal || options.makeProject) {
+    const toGlobal = options.makeGlobal === true;
+    if (actualIsGlobal === toGlobal) {
+      console.log(
+        chalk.yellow(`\nRole "${roleName}" is already ${toGlobal ? 'global' : 'app-specific'}.`)
+      );
+      return;
+    }
+    await moveRoleScope(config, roleName, actualIsGlobal);
+    return;
+  }
+
+  // Ask what to update
+  const { updateType } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'updateType',
+      message: 'What would you like to update?',
+      choices: [
+        { name: 'Edit role.md (with AI assistance)', value: 'markdown' },
+        ...(actualIsGlobal && !config
+          ? []
+          : [
+              {
+                name: actualIsGlobal
+                  ? 'Move to this project (only available in this project)'
+                  : 'Make global (available across all projects)',
+                value: 'scope',
+              },
+            ]),
+      ],
+    },
+  ]);
+
+  if (updateType === 'scope') {
+    await moveRoleScope(config, roleName, actualIsGlobal);
+    return;
+  }
+
   // Ask which CLI to use for updating the role
   const defaultCli = config?.defaultCli || 'cursor-agent';
   const { cliTool } = await inquirer.prompt([
@@ -157,6 +199,39 @@ Start by asking the user what changes they'd like to make to the "${roleName}" r
     console.log(chalk.dim(`Location: ${rolePath}`));
   } catch (error) {
     console.error(chalk.red(`\nError launching CLI: ${error}`));
+    process.exit(1);
+  }
+}
+
+async function moveRoleScope(
+  config: Config | null,
+  roleName: string,
+  currentlyGlobal: boolean
+): Promise<void> {
+  const toGlobal = !currentlyGlobal;
+
+  if (!toGlobal && !config) {
+    console.error(chalk.red('\nError: Not initialized. Run "a1 init" first.'));
+    console.error(chalk.dim('A project is required to move a global role into it.'));
+    process.exit(1);
+  }
+
+  try {
+    const { from, to } = await moveRole(config, roleName, toGlobal);
+    console.log(
+      chalk.green(
+        `\n\u2713 Role "${roleName}" is now ${toGlobal ? 'global' : 'app-specific'}`
+      )
+    );
+    console.log(chalk.dim(`Moved: ${from}`));
+    console.log(chalk.dim(`    \u2192 ${to}`));
+    if (toGlobal) {
+      console.log(
+        chalk.dim('\nThe role left the project directory — commit the deletion if it was tracked in git.')
+      );
+    }
+  } catch (error) {
+    console.error(chalk.red(`\nError moving role: ${error instanceof Error ? error.message : error}`));
     process.exit(1);
   }
 }

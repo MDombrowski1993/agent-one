@@ -183,3 +183,35 @@ export async function discoverAllRoles(config: Config | null): Promise<Discovere
 
   return [...projectRoles, ...globalRoles];
 }
+
+/**
+ * Move a role's whole directory (role.md, skills.json) between the project's
+ * .ai/roles and the global roles directory.
+ */
+export async function moveRole(
+  config: Config | null,
+  roleName: string,
+  toGlobal: boolean
+): Promise<{ from: string; to: string }> {
+  if (!toGlobal && !config) {
+    throw new Error('Config is required to move a role into a project');
+  }
+
+  const fromDir = path.dirname(getRolePath(config, roleName, !toGlobal));
+  const toDir = path.dirname(getRolePath(config, roleName, toGlobal));
+
+  if (!(await fs.pathExists(fromDir))) {
+    const scope = toGlobal ? 'app-specific' : 'global';
+    throw new Error(`${scope} role "${roleName}" does not exist at: ${fromDir}`);
+  }
+
+  if (await fs.pathExists(toDir)) {
+    const scope = toGlobal ? 'global' : 'app-specific';
+    throw new Error(`A ${scope} role "${roleName}" already exists at: ${toDir}`);
+  }
+
+  await fs.ensureDir(path.dirname(toDir));
+  await fs.move(fromDir, toDir);
+
+  return { from: fromDir, to: toDir };
+}

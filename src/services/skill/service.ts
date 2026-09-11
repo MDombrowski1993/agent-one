@@ -483,3 +483,35 @@ async function scanSkillsDirectory(
 
   return skills;
 }
+
+/**
+ * Move a skill's whole directory (skill.md, mcp.json, skill.json) between the
+ * project's .ai/skills and the global skills directory.
+ */
+export async function moveSkill(
+  config: Config | null,
+  name: string,
+  toGlobal: boolean
+): Promise<{ from: string; to: string }> {
+  if (!toGlobal && !config) {
+    throw new Error('Config is required to move a skill into a project');
+  }
+
+  const fromDir = path.dirname(getSkillPath(config, name, !toGlobal));
+  const toDir = path.dirname(getSkillPath(config, name, toGlobal));
+
+  if (!(await fs.pathExists(fromDir))) {
+    const scope = toGlobal ? 'project' : 'global';
+    throw new Error(`${scope} skill "${name}" does not exist at: ${fromDir}`);
+  }
+
+  if (await fs.pathExists(toDir)) {
+    const scope = toGlobal ? 'global' : 'project';
+    throw new Error(`A ${scope} skill "${name}" already exists at: ${toDir}`);
+  }
+
+  await fs.ensureDir(path.dirname(toDir));
+  await fs.move(fromDir, toDir);
+
+  return { from: fromDir, to: toDir };
+}

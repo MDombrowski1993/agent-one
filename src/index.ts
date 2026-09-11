@@ -106,6 +106,8 @@ program
   .description('Update an existing role interactively')
   .option('--role <role-name>', 'Role name to update')
   .option('-g, --global', 'Update a global role')
+  .option('--make-global', 'Move the role to the global roles directory')
+  .option('--make-project', 'Move the role into this project\'s .ai/roles directory')
   .action(async (options) => {
     await updateRoleCommand(options);
   });
@@ -133,6 +135,8 @@ program
   .description('Update an existing skill interactively')
   .option('--skill <skill-name>', 'Skill name to update')
   .option('-g, --global', 'Update a global skill')
+  .option('--make-global', 'Move the skill to the global skills directory')
+  .option('--make-project', 'Move the skill into this project\'s .ai/skills directory')
   .action(async (options) => {
     await updateSkillCommand(options);
   });

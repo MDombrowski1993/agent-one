@@ -10,6 +10,7 @@ import {
   loadSkillMCPRefs,
   loadSkillMeta,
   setSkillAlwaysOn,
+  moveSkill,
 } from '../services/skill/service.js';
 import { discoverAllMCPServers as discoverMCP } from '../services/mcp/manager.js';
 import { launchCLI } from '../services/cli-launcher.js';
@@ -17,6 +18,8 @@ import { launchCLI } from '../services/cli-launcher.js';
 interface UpdateSkillOptions {
   skill?: string;
   global?: boolean;
+  makeGlobal?: boolean;
+  makeProject?: boolean;
 }
 
 export async function updateSkillCommand(options: UpdateSkillOptions = {}): Promise<void> {
@@ -97,6 +100,18 @@ export async function updateSkillCommand(options: UpdateSkillOptions = {}): Prom
   console.log(chalk.cyan(chalk.bold(`\nUpdate ${skillScope} Skill: ${skillName}\n`)));
   console.log(chalk.dim(`Location: ${skillPath!}\n`));
 
+  if (options.makeGlobal || options.makeProject) {
+    const toGlobal = options.makeGlobal === true;
+    if (actualIsGlobal! === toGlobal) {
+      console.log(
+        chalk.yellow(`\nSkill "${skillName}" is already ${toGlobal ? 'global' : 'project-level'}.`)
+      );
+      return;
+    }
+    await moveSkillScope(config, skillName!, actualIsGlobal!);
+    return;
+  }
+
   const { alwaysOn } = await loadSkillMeta(config, skillName!, actualIsGlobal!);
   console.log(
     chalk.dim(`Always on: ${alwaysOn ? chalk.yellow('yes') : 'no'}\n`)
@@ -117,12 +132,27 @@ export async function updateSkillCommand(options: UpdateSkillOptions = {}): Prom
             : 'Turn on "always on" (loaded into every launch)',
           value: 'alwaysOn',
         },
+        ...(actualIsGlobal! && !config
+          ? []
+          : [
+              {
+                name: actualIsGlobal!
+                  ? 'Move to this project (only available in this project)'
+                  : 'Make global (available across all projects)',
+                value: 'scope',
+              },
+            ]),
       ],
     },
   ]);
 
   if (updateType === 'mcp') {
     await updateMCPRefs(config, skillName!, actualIsGlobal!);
+    return;
+  }
+
+  if (updateType === 'scope') {
+    await moveSkillScope(config, skillName!, actualIsGlobal!);
     return;
   }
 
@@ -242,5 +272,38 @@ async function updateMCPRefs(
       await fs.remove(mcpRefsPath);
     }
     console.log(chalk.green('\n✓ MCP references cleared'));
+  }
+}
+
+async function moveSkillScope(
+  config: Config | null,
+  skillName: string,
+  currentlyGlobal: boolean
+): Promise<void> {
+  const toGlobal = !currentlyGlobal;
+
+  if (!toGlobal && !config) {
+    console.error(chalk.red('\nError: Not initialized. Run "a1 init" first.'));
+    console.error(chalk.dim('A project is required to move a global skill into it.'));
+    process.exit(1);
+  }
+
+  try {
+    const { from, to } = await moveSkill(config, skillName, toGlobal);
+    console.log(
+      chalk.green(
+        `\n\u2713 Skill "${skillName}" is now ${toGlobal ? 'global' : 'project-level'}`
+      )
+    );
+    console.log(chalk.dim(`Moved: ${from}`));
+    console.log(chalk.dim(`    \u2192 ${to}`));
+    if (toGlobal) {
+      console.log(
+        chalk.dim('\nThe skill left the project directory — commit the deletion if it was tracked in git.')
+      );
+    }
+  } catch (error) {
+    console.error(chalk.red(`\nError moving skill: ${error instanceof Error ? error.message : error}`));
+    process.exit(1);
   }
 }
