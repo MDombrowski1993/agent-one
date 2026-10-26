@@ -100,7 +100,7 @@ export function slugify(text: string): string {
 }
 
 /**
- * Opens a new terminal (a cmux workspace inside cmux, a Ghostty window otherwise) running
+ * Opens a new terminal (a cmux workspace inside cmux, else a Ghostty tab, else a Ghostty window) running
  * `a1 create <session>` with the forum item as its first task.
  */
 export async function startSessionOnItem(
@@ -120,6 +120,17 @@ export async function startSessionOnItem(
   if (inCmux()) {
     await execFileAsync('cmux', ['new-workspace', '--name', session, '--cwd', config.projectRoot, '--command', command]);
     return `cmux workspace ${session}`;
+  }
+  // A tab in the current Ghostty window (Ghostty 1.3+ AppleScript); a new window when that is unavailable
+  const quote = (v: string) => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  try {
+    await execFileAsync('osascript', [
+      '-e',
+      `tell application "Ghostty" to new tab in front window with configuration {initial working directory:${quote(config.projectRoot)}, initial input:${quote(command)} & linefeed}`,
+    ]);
+    return `Ghostty tab ${session}`;
+  } catch {
+    // no Ghostty window, an older Ghostty, or Automation permission denied
   }
   await execFileAsync('open', [
     '-na',

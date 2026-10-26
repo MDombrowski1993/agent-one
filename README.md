@@ -367,8 +367,9 @@ and hands a thread to a new a1 session with one key. Run it in a Ghostty split o
    ```
 
 6. **Optional:** `gh auth login` for PR status (CI, Bugbot, review) in the detail pane, and
-   [Ghostty](https://ghostty.org) or [cmux](https://cmux.dev) for `s`, which opens the new session in a Ghostty window,
-   or a cmux workspace when the panel itself runs in cmux.
+   [Ghostty](https://ghostty.org) 1.3+ or [cmux](https://cmux.dev) for `s`. It opens the new session in a cmux
+   workspace when the panel runs in cmux, otherwise in a new tab of the front Ghostty window (macOS asks once to let
+   your terminal control Ghostty; if you decline, or Ghostty is older, it opens a new window instead).
 
 Then run `a1 panel` from a project directory (sessions are found under that project's worktrees).
 
@@ -383,7 +384,7 @@ SESSIONS          one line: the active session, two recent ones, S expands
 ```
 
 The detail pane on the right (under the list below 140 columns) shows the PR's status, an AI summary of the thread
-(ask / what / risk / done), and only the new messages, with older ones folded into "▸ N earlier".
+(ask / what / risk / done), and only the new messages, with older ones folded into "▸ N earlier" (`e` shows them all).
 
 | Key | Does |
 |---|---|
@@ -394,6 +395,7 @@ The detail pane on the right (under the list below 140 columns) shows the PR's s
 | `p` | Post the selected draft. Shows the exact text and asks `y` first |
 | `x` | Discard a draft (asks first), or mark an item done until it changes |
 | `z` | Snooze the item for 2 hours |
+| `e` | Show every message in the thread (`j k` scrolls them), again to collapse |
 | `o` | Open the PR, or the room in the browser |
 | `/`, `S`, `c`, `R`, `?`, `q` | Filter, expand sessions, AI check now, poll now, help, quit |
 

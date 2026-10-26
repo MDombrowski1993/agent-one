@@ -106,11 +106,7 @@ export class ForumFeed {
     }
     this.comments = this.comments.filter((c) => c.created_dt >= windowStart);
 
-    for (const author of [...fetched.map((c) => c.author), ...notifications.items.map((n) => n.preview?.author)]) {
-      if (!author?.uuid || !author.name) continue;
-      this.people.set(author.uuid, author.name);
-      if (author.email && this.me.emails.has(author.email.toLowerCase())) this.me.uuids.add(author.uuid);
-    }
+    this.learnPeople([...fetched.map((c) => c.author), ...notifications.items.map((n) => n.preview?.author)]);
 
     const notified = new Set(state.notified_ids);
     const newNotifications = notifications.items.filter((n) => !notified.has(n.id));
@@ -134,15 +130,24 @@ export class ForumFeed {
     };
   }
 
-  roomName(uuid: string | null | undefined): string {
+  /** Remembers authors so their `@<uuid>` mentions read as names; thread fetches add people older than the feed window. */
+  learnPeople(authors: Array<ForumComment['author'] | null | undefined>): void {
+    for (const author of authors) {
+      if (!author?.uuid || !author.name) continue;
+      this.people.set(author.uuid, author.name);
+      if (author.email && this.me.emails.has(author.email.toLowerCase())) this.me.uuids.add(author.uuid);
+    }
+  }
+
+    roomName(uuid: string | null | undefined): string {
     if (!uuid) return 'Record discussion';
     return this.rooms.get(uuid)?.name ?? `Room ${uuid.slice(0, 8)}`;
   }
 
-  /** Mentions arrive as `@<user uuid>`; show the person's name, and "you" for the user. */
+  /** Mentions arrive as `@<user uuid>`; show the person's name, "you" for the user, and a short id for people who never posted. */
   humanize(text: string): string {
     return text.replace(UUID_MENTION, (match, uuid: string) =>
-      this.me.uuids.has(uuid) ? '@you' : this.people.has(uuid) ? `@${this.people.get(uuid)}` : match
+      this.me.uuids.has(uuid) ? '@you' : this.people.has(uuid) ? `@${this.people.get(uuid)}` : `@${uuid.slice(0, 8)}…`
     );
   }
 

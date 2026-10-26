@@ -76,6 +76,7 @@ export function App({ config, client }: { config: Config; client: ForumClient })
   const [focus, setFocus] = useState<Focus>('list');
   const [mode, setMode] = useState<Mode>({ kind: 'normal' });
   const [threadOffset, setThreadOffset] = useState(0);
+  const [threadAll, setThreadAll] = useState(false);
   const [thread, setThread] = useState<ThreadState | null>(null);
   const [pr, setPr] = useState<PrInfo | null>(null);
   const [message, setMessage] = useState('Connecting…');
@@ -183,6 +184,7 @@ export function App({ config, client }: { config: Config; client: ForumClient })
   // Thread history and PR status for the selected item, fetched after a short pause while moving
   useEffect(() => {
     setThreadOffset(0);
+    setThreadAll(false);
     if (!selected || selected.source.kind === 'draft') {
       setThread(null);
       return;
@@ -200,11 +202,14 @@ export function App({ config, client }: { config: Config; client: ForumClient })
     setThread((t) => (t?.key === key ? t : { key, comments: [], loading: true }));
     const timer = setTimeout(() => {
       fetchRoomComments(client, target)
-        .then((comments) => setThread({ key, comments, loading: false }))
+        .then((comments) => {
+          feed.learnPeople(comments.map((c) => c.author));
+          setThread({ key, comments, loading: false });
+        })
         .catch((error) => setThread({ key, comments: [], loading: false, error: String(error?.message ?? error) }));
     }, 200);
     return () => clearTimeout(timer);
-  }, [selected?.key, client]);
+  }, [selected?.key, client, feed]);
 
   const prNumber = focus === 'sessions' ? (selectedSession?.pr ? Number(selectedSession.pr) : undefined) : selected?.pr;
   useEffect(() => {
@@ -406,6 +411,12 @@ export function App({ config, client }: { config: Config; client: ForumClient })
     else if (input === 'x' && selected.source.kind === 'draft') setMode({ kind: 'confirm-discard', draft: selected.source.item });
     else if (input === 'x') void markDone(selected);
     else if (input === 'z' && !isDraft) void snooze(selected);
+    else if (input === 'e' && !isDraft) {
+      // Every message in the thread; j/k in the detail pane scrolls through them
+      setThreadAll((all) => !all);
+      setThreadOffset(0);
+      setFocus(threadAll ? 'list' : 'detail');
+    }
     else if (input === 's' && !isDraft) setMode({ kind: 'confirm-session', ...briefFor(selected) });
     else if (input === 'r' && !isDraft) {
       if (selected.roomUuid || selected.record) setMode({ kind: 'reply', item: selected, text: '' });
@@ -482,6 +493,7 @@ export function App({ config, client }: { config: Config; client: ForumClient })
                       thread: thread?.key === selected.key ? thread : null,
                       pr,
                       offset: threadOffset,
+                      all: threadAll,
                       width: inner,
                       reply: mode.kind === 'reply' ? mode.text : undefined,
                     })
@@ -680,10 +692,12 @@ function itemDetail(p: {
   thread: ThreadState | null;
   pr: PrInfo | null;
   offset: number;
+  /** show every message instead of folding older ones */
+  all: boolean;
   width: number;
   reply?: string;
 }): DetailView {
-  const { item, feed, thread, pr, offset, width } = p;
+  const { item, feed, thread, pr, offset, all: showAll, width } = p;
   const s = item.summary;
   const out: string[] = [];
 
@@ -732,21 +746,21 @@ function itemDetail(p: {
   const dayAgo = new Date(Date.now() - 86400_000).toISOString();
   const fresh = newest.filter((c) => c.created_dt >= dayAgo);
   const pool = fresh.length ? fresh : newest.slice(0, 2);
-  const shown = pool.slice(offset, offset + 4);
-  const earlier = newest.slice(Math.min(newest.length, offset + shown.length));
+  const shown = showAll ? newest.slice(offset) : pool.slice(offset, offset + 4);
+  const earlier = showAll ? [] : newest.slice(Math.min(newest.length, offset + shown.length));
 
   out.push(
     thread?.loading
       ? fg(C.dim).bold('THREAD · loading…')
       : thread?.error
         ? fg(C.red)(`THREAD · ${truncate(thread.error, width - 10)}`)
-        : fg(C.dim).bold(`THREAD · ${fresh.length} new`) + (offset ? fg(C.dim)(`  ↓${offset}`) : '')
+        : fg(C.dim).bold(showAll ? `THREAD · all ${newest.length}` : `THREAD · ${fresh.length} new`) + (offset ? fg(C.dim)(`  ↓${offset}`) : '')
   );
   for (const c of shown) {
-    out.push(' ', ...messageLines(c, feed, width));
+    out.push(' ', ...messageLines(c, feed, width, showAll));
   }
   if (earlier.length) {
-    out.push(' ', fg(C.dim)(truncate(`  ▸ ${earlier.length} earlier · ${earlier[0].author?.name ?? '?'}: ${oneLine(readable(feed, earlier[0].body_text))}`, width)));
+    out.push(' ', fg(C.dim)(truncate(`  ▸ ${earlier.length} earlier · e show all · ${earlier[0].author?.name ?? '?'}: ${oneLine(readable(feed, earlier[0].body_text))}`, width)));
   }
 
   if (p.reply !== undefined) {
@@ -761,11 +775,12 @@ function itemDetail(p: {
       ['r', 'reply'],
       ['x', 'done'],
       ['z', 'snooze 2h'],
+      ...(showAll ? [['e', 'collapse'] as [string, string]] : earlier.length ? [['e', 'all messages'] as [string, string]] : []),
     ]),
   };
 }
 
-function messageLines(comment: ForumComment, feed: ForumFeed, width: number): string[] {
+function messageLines(comment: ForumComment, feed: ForumFeed, width: number, full = false): string[] {
   const text = readable(feed, comment.body_text);
   // Leading @mentions become a header chip; @you is highlighted
   const lead = text.match(/^((?:@[^\s,]+(?:\s+[A-Z][a-z]+)?[\s,]*)+)/)?.[1] ?? '';
@@ -781,7 +796,7 @@ function messageLines(comment: ForumComment, feed: ForumFeed, width: number): st
     fg(C.dim)(`  ${ago(comment.created_dt)}  `) +
     mentions.map((m) => (m === '@you' ? fg(C.accent)(m) : fg(C.dim)(m))).join(' ') +
     (/\bapproved\b/i.test(body) ? fg(C.green)('  ✓ approved') : '');
-  const bodyLines = clean ? wrapLines(truncate(clean, (width - 2) * 3), width - 2, fg(forMe ? C.text : C.muted)) : [];
+  const bodyLines = clean ? wrapLines(full ? clean : truncate(clean, (width - 2) * 3), width - 2, fg(forMe ? C.text : C.muted)) : [];
   return [head, ...bodyLines, ...(links[0] ? [fg(C.blue)(`↳ ${links[0]}`)] : [])].map((l) => bar + l);
 }
 
@@ -839,6 +854,7 @@ function helpView(width: number): DetailView {
     ['r', 'write a reply; it is queued, then shown for approval'],
     ['p / x', 'drafts: post as you (asks first) / discard'],
     ['x / z', 'done (until something new) / snooze 2h'],
+    ['e', 'show every message in the thread / collapse'],
     ['S', 'expand the sessions strip'],
     ['c / R', 'run an AI check now / poll now'],
     ['q', 'quit'],
