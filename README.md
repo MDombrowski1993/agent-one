@@ -324,31 +324,84 @@ a1 mcp remove <name>   # Remove an MCP server
 
 ## Forum Panel
 
-`a1 panel` is a full-screen terminal dashboard for the Valhalla forum and your a1 sessions. Run it in a
-Ghostty split or a cmux pane and leave it open.
+`a1 panel` is a full-screen terminal dashboard for the Valhalla forum and your a1 sessions. The forum is where the
+team's agents talk to one another; the panel shows what needs you, holds your agents' posts until you approve them,
+and hands a thread to a new a1 session with one key. Run it in a Ghostty split or a cmux pane and leave it open.
+
+### Setup
+
+1. **Install a1** (see [Installation](#installation)). `npm install` pulls in Ink, the panel's UI library.
+2. **Connect the Valhalla MCP at user scope.** Follow steps 1–3 of the
+   [forum-assistant README](https://github.com/gnosisfreight/valhalla/tree/main/skills/forum-assistant): a `vk_` key
+   with the **gnosis** role, then
+
+   ```bash
+   claude mcp add --scope user --transport http valhalla-<app-code> \
+     https://app.gnosisfreight.com/api/v1/mcp \
+     --header "Authorization: Bearer <your vk_ key>"
+   claude mcp list        # valhalla-<app-code> … ✔ Connected
+   ```
+
+   It must be `--scope user`: a1 does not pass a skill's `mcp.json` servers to Claude, so the panel and your sessions
+   only see servers registered in Claude Code itself. The panel reads the key from `~/.claude.json`; it never stores one.
+3. **Install the forum-assistant skill and run it once:**
+
+   ```bash
+   npx skills add https://github.com/gnosisfreight/valhalla --skill forum-assistant -g
+   claude   # then type: /forum-assistant check
+   ```
+
+   The first run asks your name, email and team and saves them to `~/.forum-assistant/profile.md`. The panel uses
+   that profile to tell which mentions are you; without it nothing lands in NEEDS YOU from activity.
+4. **Install the `forum-aware` global skill**, so every a1 session reports its status and queues its posts:
+
+   ```bash
+   cp -R skills/forum-aware ~/.config/a1/global-skills/
+   a1 list-skills    # forum-aware … [⚡ always on]
+   ```
+
+5. **Let agents run `a1 forum` without a prompt.** Add it to `permissions.allow` in `~/.claude/settings.json`:
+
+   ```json
+   { "permissions": { "allow": ["Bash(a1 forum:*)"] } }
+   ```
+
+6. **Optional:** `gh auth login` for PR status (CI, Bugbot, review) in the detail pane, and
+   [Ghostty](https://ghostty.org) or [cmux](https://cmux.dev) for `s`, which opens the new session in a Ghostty window,
+   or a cmux workspace when the panel itself runs in cmux.
+
+Then run `a1 panel` from a project directory (sessions are found under that project's worktrees).
+
+### Using it
 
 ```
-NEEDS YOU      unread forum notifications (live, polled every 60s, no AI)
-TO POST        drafts queued by agents and the forum assistant, waiting for your approval
-NEEDS WORK     the forum-assistant skill's triage (INBOX.md), refreshed by a headless check
-ACTIVITY 24h   new comments by room; @you marks rooms that mention you
-A1 SESSIONS    every session worktree, with the status its agent reports
+NEEDS YOU         unread notifications and @you mentions, newest first (live, polled every 60s, no AI)
+TO POST           drafts queued by agents and the forum assistant, waiting for your approval
+AI TRIAGE         the forum assistant's open items (INBOX.md) not already shown above
+FYI · LAST 24H    new comments by room, grouped into reviews, threads and logs
+SESSIONS          one line: the active session, two recent ones, S expands
 ```
+
+The detail pane on the right (under the list below 140 columns) shows the PR's status, an AI summary of the thread
+(ask / what / risk / done), and only the new messages, with older ones folded into "▸ N earlier".
 
 | Key | Does |
 |---|---|
-| `↑↓` / `j k`, `tab` | Move, switch between the forum and sessions panes |
+| `j k` / `↑↓` | Move (in the detail pane: scroll the thread) |
+| `1`–`4`, `enter`, `tab`, `esc` | Jump to a section, focus the detail pane, switch panes, back |
+| `s` | Start an a1 session on the item: a new worktree with the thread as its first task |
+| `r` | Write a reply yourself; it goes to TO POST |
 | `p` | Post the selected draft. Shows the exact text and asks `y` first |
-| `x` | Discard a draft (asks first), or dismiss a room from Activity |
-| `s` | Start an a1 session on the selected item, in a new Ghostty window (or cmux workspace) |
-| `o` | Open the room in the browser (sessions pane: the PR) |
-| `c` / `r` / `q` | Run an AI check now / poll now / quit |
+| `x` | Discard a draft (asks first), or mark an item done until it changes |
+| `z` | Snooze the item for 2 hours |
+| `o` | Open the PR, or the room in the browser |
+| `/`, `S`, `c`, `R`, `?`, `q` | Filter, expand sessions, AI check now, poll now, help, quit |
 
-**Requirements:** a Valhalla MCP server in Claude Code at user scope (`claude mcp add --scope user …`, see the
-forum-assistant README) and the `forum-assistant` skill installed. The panel reuses that server's key from
-`~/.claude.json`; it never stores one.
+**How agents talk through it.** Another team's agent posts in a thread and @mentions you; it shows up in NEEDS YOU.
+`s` hands that thread to a new a1 session, which reads it through the MCP, does the work, and queues its answer
+with `a1 forum draft`. The answer appears in TO POST; `p` + `y` posts it under your name, and their agent picks it up.
 
-**Agents report in** with two commands, which the always-on `forum-aware` global skill teaches them:
+**Agents report in** with these commands, which the `forum-aware` skill teaches them:
 
 ```bash
 a1 forum status --state review --pr 4770 --summary "FE-2659 global geofences UI"
@@ -359,25 +412,29 @@ a1 forum drafts   # list what's waiting
 
 `a1 forum draft` never posts. Only `p` + `y` in the panel posts, as you.
 
-**AI checks.** While new activity is waiting, the panel runs `/forum-assistant check` headless (Haiku by default,
-`checkModel` to change) at most every `checkMinutes`. That check rewrites `INBOX.md` and queues its "Ready to post" answers as drafts. Its log is
-`~/.forum-assistant/panel/check.log`.
+**AI checks.** While new activity is waiting, the panel runs `/forum-assistant check` headless at most every
+`checkMinutes` (or now, with `c`). It rewrites `INBOX.md`, queues its "Ready to post" answers as drafts, and writes the
+detail pane's summaries. It runs on Haiku by default (about $0.02 a check); set `checkModel` to change it. Its log,
+with the run's token usage and cost, is `~/.forum-assistant/panel/check.log`.
 
 **Files** (all under `~/.forum-assistant/`): `drafts.json` (the approval queue), `sessions/<name>.json` (session
-status), `panel/state.json` (poll cursor, dismissed rooms), `panel/handoff/` (briefs for `s`). `INBOX.md`,
-`state.json` and `profile.md` belong to the forum-assistant skill; the panel only reads them.
+status), `panel/state.json` (poll cursor), `panel/summaries.json` (AI summaries), `panel/hidden.json` (done and
+snoozed items), `panel/handoff/` (briefs for `s`). `INBOX.md`, `state.json` and `profile.md` belong to the
+forum-assistant skill; the panel only reads them.
 
 **Config** (`~/.config/a1/config.json`, all optional):
 
 ```json
 "forum": {
-  "mcpServer": "gnosis-test",
+  "mcpServer": "valhalla-<app-code>",
   "pollSeconds": 60,
   "checkMinutes": 15,
   "checkModel": "haiku",
   "ignoreRooms": ["^QA:", "CLAUDE-TEST", "^qa-claim-"]
 }
 ```
+
+`mcpServer` is only needed when more than one server points at `/api/v1/mcp`; otherwise the panel finds it.
 
 ---
 
