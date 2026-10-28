@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { readFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -210,11 +210,24 @@ mcpCommand
 // a1 panel
 program
   .command('panel')
-  .description('Forum and session control panel (run it in a Ghostty split or cmux pane)')
-  .action(async () => {
+  .description('Session manager, with the forum one tab away (runs in its own tmux)')
+  .option('--forum', 'Open only the forum, without tmux')
+  .option('--stop', "Stop this project's panel and every session running in it")
+  .addOption(new Option('--manager').hideHelp())
+  .action(async (options) => {
     // Loaded lazily so other commands don't pay for Ink/React
     const { panelCommand } = await import('./commands/panel.js');
-    await panelCommand();
+    await panelCommand(options);
+  });
+
+// a1 resume <session-name>
+program
+  .command('resume <session-name>')
+  .description("Reopen a session's worktree and continue its last conversation")
+  .option('--cli <cli-tool>', 'Override default CLI (cursor-agent, claude, codex, gemini)')
+  .action(async (sessionName: string, options) => {
+    const { resumeCommand } = await import('./commands/resume.js');
+    await resumeCommand(sessionName, options);
   });
 
 // a1 forum

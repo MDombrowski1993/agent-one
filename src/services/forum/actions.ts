@@ -100,8 +100,8 @@ export function slugify(text: string): string {
 }
 
 /**
- * Opens a new terminal (a cmux workspace inside cmux, else a Ghostty tab, else a Ghostty window) running
- * `a1 create <session>` with the forum item as its first task.
+ * Opens the session: in the panel's session list when run inside `a1 panel`, else a cmux workspace inside cmux,
+ * else a Ghostty tab, else a Ghostty window. Each runs `a1 create <session>` with the forum item as its first task.
  */
 export async function startSessionOnItem(
   config: Config,
@@ -115,6 +115,13 @@ export async function startSessionOnItem(
     `${brief}\n\nWhen you have something to say back in this thread, queue it with \`a1 forum draft --room <room uuid> --thread <thread id> --title "<room name>" --body-file <file>\` (drafts land in ${DRAFTS_FILE}). Do not post it yourself: the user posts from the panel.\n`,
     'utf-8'
   );
+
+  // Inside the session manager the session joins its list, in this same terminal
+  if (process.env.A1_PANEL_TMUX) {
+    const { startSessionPane } = await import('../../manager/tmux.js');
+    await startSessionPane(config, session, ['create', session, '--prompt-file', briefFile]);
+    return 'new panel session';
+  }
 
   const command = `a1 create ${session} --prompt-file ${JSON.stringify(briefFile)}`;
   if (inCmux()) {

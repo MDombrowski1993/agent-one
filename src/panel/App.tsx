@@ -25,6 +25,8 @@ import {
   readSummaries,
 } from './data.js';
 import { ListItem, Model, SECTION_LABEL, SectionId, buildModel } from './model.js';
+import { KeyBar, KeyHint, inkBar } from './keys.js';
+import { isMouseInput, useMouse } from './mouse.js';
 
 const LOCAL_REFRESH_MS = 3000;
 const SNOOZE_MS = 2 * 60 * 60_000;
@@ -50,7 +52,18 @@ interface ThreadState {
   error?: string;
 }
 
-export function App({ config, client }: { config: Config; client: ForumClient }) {
+/** Set when the forum runs inside the session manager rather than as its own screen. */
+export interface Embedded {
+  /** back to the sessions tab */
+  onQuit: () => void;
+  /** leave the whole panel, as q does on the sessions tab */
+  onDetach: () => void;
+  onSessionStarted?: (session: string) => void;
+  /** the manager draws the key bar; the forum tells it what to list */
+  onKeys: (bar: KeyBar) => void;
+}
+
+export function App({ config, client, embedded }: { config: Config; client: ForumClient; embedded?: Embedded }) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [size, setSize] = useState({ cols: stdout.columns ?? 160, rows: stdout.rows ?? 48 });
@@ -321,7 +334,7 @@ export function App({ config, client }: { config: Config; client: ForumClient })
     });
 
   useInput((input, key) => {
-    if (busy) return;
+    if (busy || isMouseInput(input)) return;
 
     // Text entry modes take every key
     if (mode.kind === 'filter') {
@@ -354,7 +367,11 @@ export function App({ config, client }: { config: Config; client: ForumClient })
           });
         } else {
           const { name, brief } = mode;
-          void act('Start session', async () => `Started ${name} in a ${await startSessionOnItem(config, name, brief)}`);
+          void act('Start session', async () => {
+            const where = await startSessionOnItem(config, name, brief);
+            embedded?.onSessionStarted?.(name);
+            return `Started ${name} in a ${where}`;
+          });
         }
       } else if (input === 'n' || key.escape) {
         setMode({ kind: 'normal' });
@@ -367,8 +384,10 @@ export function App({ config, client }: { config: Config; client: ForumClient })
       return;
     }
 
-    // Global keys
-    if (input === 'q') return exit();
+    // Global keys. F1 or a click on the Sessions tab (tmux sends M-1 for both) goes back to sessions; tab too
+    if (key.meta && /^[12]$/.test(input)) return input === '1' ? embedded?.onQuit() : undefined;
+    if (key.tab) return embedded?.onQuit();
+    if (input === 'q') return embedded ? embedded.onDetach() : exit();
     if (input === '?') return setMode({ kind: 'help' });
     if (input === '/') return setMode({ kind: 'filter' });
     if (input === 'c') return void startCheck();
@@ -376,7 +395,7 @@ export function App({ config, client }: { config: Config; client: ForumClient })
       setMessage('Refreshing…');
       return void Promise.all([refreshLocal(), poll()]).then(() => setMessage(''));
     }
-    if (input === 'S') {
+    if (input === 'S' && !embedded) {
       setSessionsExpanded((e) => !e);
       setFocus((f) => (f === 'sessions' ? 'list' : 'sessions'));
       return;
@@ -387,8 +406,9 @@ export function App({ config, client }: { config: Config; client: ForumClient })
       setSessionsExpanded(false);
       return;
     }
-    if (key.return && focus === 'list') return setFocus('detail');
-    if (key.tab) return setFocus((f) => (f === 'list' ? 'detail' : f === 'detail' ? (sessionsExpanded ? 'sessions' : 'list') : 'list'));
+    // ← → move between the list and the detail pane
+    if ((key.return || key.rightArrow || input === 'l') && focus === 'list') return setFocus('detail');
+    if ((key.leftArrow || input === 'h') && focus !== 'list') return setFocus('list');
 
     const delta = key.downArrow || input === 'j' ? 1 : key.upArrow || input === 'k' ? -1 : 0;
 
@@ -427,11 +447,13 @@ export function App({ config, client }: { config: Config; client: ForumClient })
   // --- Layout ---
 
   const wide = size.cols >= 140;
+  const showStrip = !embedded;
   const activeSessions = sessions.filter(
     (s) => s.live && s.reported && !['ended', 'done'].includes(s.state) && Date.now() - Date.parse(s.updated_at) < ACTIVE_MS
   );
-  const stripHeight = sessionsExpanded ? Math.min(sessions.length + 3, Math.floor(size.rows / 3)) : 3;
-  const mainHeight = Math.max(10, size.rows - 2 - stripHeight);
+  const stripHeight = !showStrip ? 0 : sessionsExpanded ? Math.min(sessions.length + 3, Math.floor(size.rows / 3)) : 3;
+  // The header, plus the key bar when the forum draws its own (outside the session manager)
+  const mainHeight = Math.max(10, size.rows - (embedded ? 1 : 2) - stripHeight);
   const listWidth = wide ? Math.floor(size.cols * 0.52) : size.cols;
   const detailWidth = wide ? size.cols - listWidth - 1 : size.cols;
   const listHeight = wide ? mainHeight : Math.floor(mainHeight * 0.5);
@@ -444,31 +466,11 @@ export function App({ config, client }: { config: Config; client: ForumClient })
         {filter ? `  ${fg(C.accent)(`/${filter}`)}` : ''}
       </Text>
       <Text>
+        {busy ? fg(C.accent)('working…  ') : message ? fg(C.accent)(`${truncate(message, 60)}  `) : ''}
         {pollError ? fg(C.red)(`poll failed: ${truncate(pollError, 40)}`) : fg(C.dim)(`polled ${ago(snapshot?.polledAt)}`)}
         {fg(C.dim)(` · AI check ${checkState === 'running' ? 'running' : ago(inbox.mtime?.toISOString())} · `)}
         {checkState === 'failed' ? fg(C.red)('failed') : checkState === 'running' ? fg(C.accent)('…') : fg(C.green)('ok')}
       </Text>
-    </Box>
-  );
-
-  const footer = (
-    <Box justifyContent="space-between" paddingX={1}>
-      <Text wrap="truncate-end">
-        {[
-          ['j/k', 'move'],
-          ['1-4', 'jump section'],
-          ['enter', 'focus detail'],
-          ['/', 'filter'],
-          ['S', 'sessions'],
-          ['c', 'AI check'],
-          ['R', 'refresh'],
-          ['?', 'help'],
-          ['q', 'quit'],
-        ]
-          .map(([k, label]) => `${fg(C.bright)(k)} ${fg(C.dim)(label)}`)
-          .join('   ')}
-      </Text>
-      <Text>{busy ? fg(C.accent)('working…') : fg(C.dim)(message)}</Text>
     </Box>
   );
 
@@ -497,21 +499,68 @@ export function App({ config, client }: { config: Config; client: ForumClient })
                       width: inner,
                       reply: mode.kind === 'reply' ? mode.text : undefined,
                     })
-                  : { lines: [fg(C.dim)(snapshot ? 'Nothing here. Inbox zero.' : 'Loading the forum…')], keys: '' };
+                  : { lines: [fg(C.dim)(snapshot ? 'Nothing here. Inbox zero.' : 'Loading the forum…')], keys: [] };
+
+  // One key bar for the whole forum: navigation for the focused pane, the selected item's actions, then the rest
+  const textMode = mode.kind === 'filter' || mode.kind === 'reply' || mode.kind === 'help' || mode.kind.startsWith('confirm');
+  const keyBar: KeyBar = textMode
+    ? {
+        context:
+          mode.kind === 'filter'
+            ? [['type', 'to filter'], ['enter', 'keep it'], ['esc', 'clear']]
+            : mode.kind === 'help'
+              ? [['any key', 'closes help']]
+              : detailView.keys,
+        global: [],
+      }
+    : {
+        context: [
+          ...((focus === 'list'
+            ? [['↑↓', 'move'], ['→', 'thread']]
+            : focus === 'detail'
+              ? [['↑↓', 'scroll'], ['←', 'list']]
+              : [['↑↓', 'select'], ['esc', 'back']]) as KeyHint[]),
+          ...detailView.keys,
+          ['/', 'filter'],
+          ['1-4', 'section'],
+          ['c', 'AI check'],
+          ['R', 'poll'],
+        ],
+        global: [
+          ...((embedded ? [['F1', 'sessions']] : [['S', 'sessions']]) as KeyHint[]),
+          ['?', 'help'],
+          ['q', embedded ? 'detach' : 'quit'],
+        ],
+      };
+  const barKey = JSON.stringify(keyBar);
+  useEffect(() => {
+    embedded?.onKeys(JSON.parse(barKey));
+  }, [barKey]);
+
+  // Click the list to select an item, the detail pane to focus it; the wheel moves or scrolls whichever it is over
+  const listRows = listLines({ model, selectedKey: selected?.key, width: listWidth, height: listHeight, filtering: mode.kind === 'filter', filter });
+  useMouse((event) => {
+    if (mode.kind !== 'normal') return;
+    const top = 2; // the header line, then the boxes start
+    const inList = wide ? event.x <= listWidth : event.y < top + listHeight;
+    if (event.y < top || event.y >= top + mainHeight) return;
+    if (event.button !== 'left') {
+      const delta = event.button === 'wheel-down' ? 1 : -1;
+      if (inList) move(delta);
+      else setThreadOffset((o) => Math.max(0, o + delta));
+      return;
+    }
+    if (!inList) return setFocus('detail');
+    setFocus('list');
+    const itemKey = listRows.visible[event.y - top - 1]?.itemKey;
+    if (itemKey) setSelectedKey(itemKey);
+  });
 
   return (
     <Box flexDirection="column" width={size.cols} height={size.rows}>
       {header}
       <Box flexDirection={wide ? 'row' : 'column'} gap={wide ? 1 : 0}>
-        <ListPane
-          model={model}
-          selectedKey={selected?.key}
-          focused={focus === 'list'}
-          width={listWidth}
-          height={listHeight}
-          filtering={mode.kind === 'filter'}
-          filter={filter}
-        />
+        <ListPane rows={listRows} focused={focus === 'list'} width={listWidth} height={listHeight} />
         <DetailPane
           view={detailView}
           width={detailWidth}
@@ -519,6 +568,7 @@ export function App({ config, client }: { config: Config; client: ForumClient })
           highlight={focus === 'detail' || mode.kind !== 'normal'}
         />
       </Box>
+      {showStrip && (
       <SessionsStrip
         sessions={sessions}
         active={activeSessions}
@@ -528,26 +578,28 @@ export function App({ config, client }: { config: Config; client: ForumClient })
         width={size.cols}
         height={stripHeight}
       />
-      {footer}
+      )}
+      {!embedded && (
+        <Box paddingX={1}>
+          <Text wrap="truncate-end">{inkBar(keyBar, size.cols - 2)}</Text>
+        </Box>
+      )}
     </Box>
   );
 }
 
 // --- List pane ---
 
-function ListPane(props: {
-  model: Model;
-  selectedKey?: string;
-  focused: boolean;
-  width: number;
-  height: number;
-  filtering: boolean;
-  filter: string;
-}) {
+type ListLine = { text: string; key: string; itemKey?: string };
+
+/** The list's lines as drawn: what is scrolled into view, and the lines pinned to the bottom. */
+function listLines(props: { model: Model; selectedKey?: string; width: number; height: number; filtering: boolean; filter: string }): {
+  visible: ListLine[];
+  bottom: string[];
+} {
   const { model, selectedKey, width, height } = props;
   const inner = width - 4;
-  type Line = { text: string; key: string; itemKey?: string };
-  const lines: Line[] = [];
+  const lines: ListLine[] = [];
 
   for (const section of SECTION_ORDER) {
     const sectionItems = model.items.filter((it) => it.section === section);
@@ -580,8 +632,12 @@ function ListPane(props: {
   const room = Math.max(3, height - 2 - bottom.length);
   const selectedLine = lines.findIndex((l) => l.itemKey === selectedKey);
   const start = Math.max(0, Math.min(selectedLine - Math.floor(room / 3), lines.length - room));
-  const visible = lines.slice(start, start + room);
+  return { visible: lines.slice(start, start + room), bottom };
+}
 
+function ListPane(props: { rows: { visible: ListLine[]; bottom: string[] }; focused: boolean; width: number; height: number }) {
+  const { visible, bottom } = props.rows;
+  const { width, height } = props;
   return (
     <Box flexDirection="column" width={width} height={height} borderStyle="round" borderColor={props.focused ? C.blue : C.border} paddingX={1}>
       {visible.map((l) => (
@@ -625,10 +681,10 @@ function renderRow(item: ListItem, selected: boolean, width: number): string {
 
 interface DetailView {
   lines: string[];
-  keys: string;
+  /** the actions for what is shown; they go in the key bar */
+  keys: KeyHint[];
 }
 
-const keyHints = (pairs: [string, string][]) => pairs.map(([k, label]) => `${fg(C.bright)(k)} ${fg(C.dim)(label)}`).join('   ');
 
 function wrapLines(text: string, width: number, color: (s: string) => string = (s) => s): string[] {
   return wrapAnsi(text, Math.max(10, width), { hard: true, trim: false })
@@ -650,7 +706,7 @@ function truncateAnsi(text: string, width: number): string {
 
 function DetailPane(props: { view: DetailView; width: number; height: number; highlight: boolean }) {
   const inner = props.width - 4;
-  const room = Math.max(1, props.height - 3);
+  const room = Math.max(1, props.height - 2);
   const body = props.view.lines.flatMap((l) => (stringWidth(l) > inner ? wrapLines(l, inner) : [l])).slice(0, room);
   while (body.length < room) body.push(' ');
   return (
@@ -660,7 +716,6 @@ function DetailPane(props: { view: DetailView; width: number; height: number; hi
           {l || ' '}
         </Text>
       ))}
-      <Text wrap="truncate-end">{props.view.keys}</Text>
     </Box>
   );
 }
@@ -765,17 +820,17 @@ function itemDetail(p: {
 
   if (p.reply !== undefined) {
     out.push(' ', fg(C.accent)('reply › ') + p.reply + fg(C.accent)('▌'));
-    return { lines: out, keys: keyHints([['enter', 'queue it, then review before posting'], ['esc', 'cancel']]) };
+    return { lines: out, keys: ([['enter', 'queue it, then review before posting'], ['esc', 'cancel']]) };
   }
   return {
     lines: out,
-    keys: keyHints([
-      ['o', item.pr ? 'open PR' : 'open room'],
-      ['s', item.pr && item.tag !== 'thr' ? 'start review session' : 'start session'],
+    keys: ([
+      ['o', item.pr ? 'PR' : 'room'],
+      ['s', item.pr && item.tag !== 'thr' ? 'review session' : 'session'],
       ['r', 'reply'],
       ['x', 'done'],
-      ['z', 'snooze 2h'],
-      ...(showAll ? [['e', 'collapse'] as [string, string]] : earlier.length ? [['e', 'all messages'] as [string, string]] : []),
+      ['z', 'snooze'],
+      ...(showAll ? [['e', 'collapse'] as KeyHint] : earlier.length ? [['e', 'expand'] as KeyHint] : []),
     ]),
   };
 }
@@ -810,7 +865,7 @@ function draftDetail(item: ListItem, draft: Draft, width: number): DetailView {
       ...(draft.room?.description ? [...wrapLines(draft.room.description, width, fg(C.muted)), ' '] : []),
       ...draft.body_text.split('\n').flatMap((l) => wrapLines(l, width, fg(C.text))),
     ],
-    keys: keyHints([
+    keys: ([
       ['p', 'post as you'],
       ['x', 'discard'],
       ['o', 'open room'],
@@ -827,7 +882,7 @@ function draftRoomName(feed: ForumFeed, d: Draft): string {
 function confirmView(title: string, body: string, yes: string, no: string, width: number): DetailView {
   return {
     lines: [...wrapLines(title, width, fg(C.accent).bold), ' ', ...body.split('\n').flatMap((l) => wrapLines(l, width, fg(C.text)))],
-    keys: keyHints([
+    keys: ([
       ['y', yes],
       ['n', no],
     ]),
@@ -846,8 +901,10 @@ function confirmPostView(feed: ForumFeed, draft: Draft, width: number): DetailVi
 function helpView(width: number): DetailView {
   const rows: [string, string][] = [
     ['j/k ↑↓', 'move (in the detail pane: scroll the thread)'],
+    ['← → / click', 'the list or the detail pane (enter and esc too)'],
+    ['wheel', 'move the list or scroll the thread, whichever it is over'],
     ['1-4', 'jump to a section'],
-    ['enter / tab / esc', 'focus the detail pane / cycle / back'],
+    ['F1 / F2', 'the Sessions / Forum tab, from anywhere in the panel'],
     ['/', 'filter the list'],
     ['o', 'open the PR, or the room in the browser'],
     ['s', 'start an a1 session on the item (a review session for PRs)'],
@@ -855,9 +912,9 @@ function helpView(width: number): DetailView {
     ['p / x', 'drafts: post as you (asks first) / discard'],
     ['x / z', 'done (until something new) / snooze 2h'],
     ['e', 'show every message in the thread / collapse'],
-    ['S', 'expand the sessions strip'],
+    ['S', 'expand the sessions strip (forum on its own only)'],
     ['c / R', 'run an AI check now / poll now'],
-    ['q', 'quit'],
+    ['q', 'quit (detach, in the session manager)'],
   ];
   return {
     lines: [
@@ -867,17 +924,14 @@ function helpView(width: number): DetailView {
       ' ',
       ...wrapLines('Nothing is posted without your y. Done and snooze only hide items in this panel; nothing is marked read on the forum.', width, fg(C.dim)),
     ],
-    keys: fg(C.dim)('any key closes'),
+    keys: [['any key', 'closes help']],
   };
 }
 
 // --- Sessions ---
 
 function sessionDetail(session: SessionView | undefined, pr: PrInfo | null, drafts: Draft[], feed: ForumFeed, width: number): DetailView {
-  const keys = keyHints([
-    ['o', 'open PR / room'],
-    ['esc', 'back'],
-  ]);
+  const keys: KeyHint[] = [['o', 'open PR / room']];
   if (!session) return { lines: [fg(C.dim)('No sessions. Start one with a1 create, or press s on a forum item.')], keys };
   const own = drafts.filter((d) => d.source === `a1:${session.session}` && d.status === 'pending');
   return {

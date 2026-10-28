@@ -101,6 +101,12 @@ export async function createCommand(
       console.log(chalk.dim(`  To push: cd ${sessionPath} && git push -u origin ${sessionName}`));
     }
 
+    // In a1 panel the pane stays open after exit; r there resumes, so don't block it on a prompt
+    if (process.env.A1_PANEL) {
+      console.log(chalk.dim('  Session ended. Press r in a1 panel to resume it.'));
+      process.exit(exitCode);
+    }
+
     const { cleanup } = await inquirer.prompt([
       {
         type: 'confirm',
