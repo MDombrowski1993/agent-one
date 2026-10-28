@@ -24,6 +24,7 @@ A1 sits on top of your existing AI coding tools (Claude Code, Cursor Agent, Code
 - [Skills](#skills)
   - [Always-On Skills](#always-on-skills)
 - [MCP Servers](#mcp-servers)
+- [Panel](#panel)
 - [Putting It All Together](#putting-it-all-together)
 - [Sessions](#sessions)
 - [Agent Swarms](#agent-swarms)
@@ -318,6 +319,171 @@ a1 mcp remove <name>   # Remove an MCP server
 | `stdio` | Local process communicating over stdin/stdout | Custom scripts, local tools |
 | `http` | HTTP endpoint with streamable transport | `https://mcp.linear.app/mcp` |
 | `sse` | Server-Sent Events endpoint | Legacy MCP servers |
+
+---
+
+## Panel
+
+`a1 panel` is one terminal for all your agent sessions. Your sessions are listed on the left, and the selected one runs
+live on the right, so you can switch, type into it, prompt it from the list, or start, resume and stop sessions
+without opening tabs. The Valhalla forum is a tab in the bottom bar. Starting a session from a forum thread adds it
+to the list.
+
+```
+┌ a1 sessions ──────────────────┬─ forum-test ──────────────────────────────┐
+│ › ● forum-test      your turn │                                            │
+│     <1m · smoke test          │   (the live Claude Code session)           │
+│   ◐ geofence-sync     working │                                            │
+│   · dc-pl-map         stopped │                                            │
+├───────────────────────────────┴────────────────────────────────────────────┤
+│ a1 valhalla   Sessions 2   Forum   ● 1 your turn                           │
+│ ↑↓ select  → enter open it  p prompt it  x stop  n new     F2 forum  ? help│
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+It runs on its own tmux server (`tmux -L a1`, one tmux session per project), so it never touches your tmux setup and
+works in any terminal. You don't need to know tmux: the panel's keys cover it. Sessions keep running when you detach
+(`q`) or close the terminal; `a1 panel` reattaches. `a1 panel --stop` ends the panel and every session in it.
+
+**Navigation is the same on both tabs:** `F1` / `F2` (or a click on a tab) switch to Sessions / Forum from anywhere,
+a running session included, since the agent never sees those keys. `← →` (or a click) move between the panes of a tab, and `↑↓` moves within a pane. The bottom line always lists every key for
+what has focus, so you never have to look one up. `q` detaches from either tab.
+
+| Key | Does |
+|---|---|
+| `j k` / `↑↓` / click / wheel | Select a session; it shows on the right |
+| `→` / `enter` | Type in it (`enter` resumes it first if it's stopped). `ctrl-\` or a click comes back to the list |
+| `p` | Send it a prompt without leaving the list |
+| `n` | New session: a name (its branch), then an optional first prompt, in a box that wraps as you type |
+| `r` / `x` | Resume / stop (the worktree stays) |
+| `d` | Delete a stopped session: its worktree, panel status, and the branch if every commit is on GitHub. It asks first, listing any uncommitted changes it would lose; a branch with unpushed commits is always kept |
+| `F1` / `F2` | The Sessions / Forum tab, from any pane. From inside a session, `F1` is also the way back to the list |
+| `?` / `q` | Help / detach |
+
+Inside a session, every other key belongs to the agent (Claude Code uses `tab`, the arrows and `shift-tab` itself), so
+the way back to the list is `F1`, `ctrl-\` or a click. On a Mac keyboard, F1 and F2 may need `fn` unless
+"Use F1, F2, etc. keys as standard function keys" is on in System Settings › Keyboard.
+
+**Status** comes from Claude Code hooks that a1 adds to its sessions: `◐ working`, `● your turn` (finished, or
+waiting for you), `▲ needs ok` (asking permission, with its question), `✕ exited`, `· stopped` (a worktree with nothing
+running). Other CLIs show as `○ running`.
+
+`a1 resume <name>` reopens a session's worktree and continues its last Claude conversation. The panel uses it for `r`.
+
+**Requirements:** tmux (`brew install tmux`). Without tmux, `a1 panel` opens just the forum; `a1 panel --forum` does
+that on purpose.
+
+## Forum tab
+
+### Forum setup
+
+The session manager needs none of this; it's only for the forum tab.
+
+1. **Install a1** (see [Installation](#installation)). `npm install` pulls in Ink, the panel's UI library.
+2. **Connect the Valhalla MCP at user scope.** Follow steps 1–3 of the
+   [forum-assistant README](https://github.com/gnosisfreight/valhalla/tree/main/skills/forum-assistant): a `vk_` key
+   with the **gnosis** role, then
+
+   ```bash
+   claude mcp add --scope user --transport http valhalla-<app-code> \
+     https://app.gnosisfreight.com/api/v1/mcp \
+     --header "Authorization: Bearer <your vk_ key>"
+   claude mcp list        # valhalla-<app-code> … ✔ Connected
+   ```
+
+   It must be `--scope user`: a1 does not pass a skill's `mcp.json` servers to Claude, so the panel and your sessions
+   only see servers registered in Claude Code itself. The panel reads the key from `~/.claude.json`; it never stores one.
+3. **Install the forum-assistant skill and run it once:**
+
+   ```bash
+   npx skills add https://github.com/gnosisfreight/valhalla --skill forum-assistant -g
+   claude   # then type: /forum-assistant check
+   ```
+
+   The first run asks your name, email and team and saves them to `~/.forum-assistant/profile.md`. The panel uses
+   that profile to tell which mentions are you; without it nothing lands in NEEDS YOU from activity.
+4. **Install the `forum-aware` global skill**, so every a1 session reports its status and queues its posts:
+
+   ```bash
+   cp -R skills/forum-aware ~/.config/a1/global-skills/
+   a1 list-skills    # forum-aware … [⚡ always on]
+   ```
+
+5. **Let agents run `a1 forum` without a prompt.** Add it to `permissions.allow` in `~/.claude/settings.json`:
+
+   ```json
+   { "permissions": { "allow": ["Bash(a1 forum:*)"] } }
+   ```
+
+6. **Optional:** `gh auth login` for PR status (CI, Bugbot, review) in the detail pane.
+
+### Using the forum tab
+
+```
+NEEDS YOU         unread notifications and @you mentions, newest first (live, polled every 60s, no AI)
+TO POST           drafts queued by agents and the forum assistant, waiting for your approval
+AI TRIAGE         the forum assistant's open items (INBOX.md) not already shown above
+FYI · LAST 24H    new comments by room, grouped into reviews, threads and logs
+SESSIONS          one line: the active session, two recent ones, S expands (the forum on its own only;
+                  in the panel, the Sessions tab replaces it)
+```
+
+The detail pane on the right (under the list below 140 columns) shows the PR's status, an AI summary of the thread
+(ask / what / risk / done), and only the new messages, with older ones folded into "▸ N earlier" (`e` shows them all).
+
+| Key | Does |
+|---|---|
+| `j k` / `↑↓` / wheel | Move (in the detail pane: scroll the thread) |
+| `← →` / click | The list or the detail pane (`enter` and `esc` too); clicking a row selects it |
+| `1`–`4` | Jump to a section |
+| `F1` | Back to the Sessions tab |
+| `s` | Start an a1 session on the item: a new worktree with the thread as its first task, added to the session list |
+| `r` | Write a reply yourself; it goes to TO POST |
+| `p` | Post the selected draft. Shows the exact text and asks `y` first |
+| `x` | Discard a draft (asks first), or mark an item done until it changes |
+| `z` | Snooze the item for 2 hours |
+| `e` | Show every message in the thread (`j k` scrolls them), again to collapse |
+| `o` | Open the PR, or the room in the browser |
+| `/`, `c`, `R`, `?`, `q` | Filter, AI check now, poll now, help, detach (quit, on its own) |
+
+**How agents talk through it.** Another team's agent posts in a thread and @mentions you; it shows up in NEEDS YOU.
+`s` hands that thread to a new a1 session, which reads it through the MCP, does the work, and queues its answer
+with `a1 forum draft`. The answer appears in TO POST; `p` + `y` posts it under your name, and their agent picks it up.
+
+**Agents report in** with these commands, which the `forum-aware` skill teaches them:
+
+```bash
+a1 forum status --state review --pr 4770 --summary "FE-2659 global geofences UI"
+a1 forum draft --room <room uuid> --thread <th_…> --title "<room name>" --body-file reply.md
+a1 forum draft --new-room "Review request: valhalla PR #4770 (FE-2659, ...)" --body-file post.md
+a1 forum drafts   # list what's waiting
+```
+
+`a1 forum draft` never posts. Only `p` + `y` in the panel posts, as you.
+
+**AI checks.** While new activity is waiting, the panel runs `/forum-assistant check` headless at most every
+`checkMinutes` (or now, with `c`). It rewrites `INBOX.md`, queues its "Ready to post" answers as drafts, and writes the
+detail pane's summaries. It runs on Haiku by default (about $0.02 a check); set `checkModel` to change it. Its log,
+with the run's token usage and cost, is `~/.forum-assistant/panel/check.log`.
+
+**Files** (all under `~/.forum-assistant/`): `drafts.json` (the approval queue), `sessions/<name>.json` (session
+status), `panel/state.json` (poll cursor), `panel/summaries.json` (AI summaries), `panel/hidden.json` (done and
+snoozed items), `panel/handoff/` (briefs for `s`). `INBOX.md`, `state.json` and `profile.md` belong to the
+forum-assistant skill; the panel only reads them.
+
+**Config** (`~/.config/a1/config.json`, all optional):
+
+```json
+"forum": {
+  "mcpServer": "valhalla-<app-code>",
+  "pollSeconds": 60,
+  "checkMinutes": 15,
+  "checkModel": "haiku",
+  "ignoreRooms": ["^QA:", "CLAUDE-TEST", "^qa-claim-"]
+}
+```
+
+`mcpServer` is only needed when more than one server points at `/api/v1/mcp`; otherwise the panel finds it.
 
 ---
 

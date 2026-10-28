@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { readFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -23,6 +23,7 @@ import { listSkillsCommand } from './commands/list-skills.js';
 import { assignSkillCommand } from './commands/assign-skill.js';
 import { listRolesCommand } from './commands/list-roles.js';
 import { setupWorktreeCommand } from './commands/setup-worktree.js';
+import { forumDraftCommand, forumDraftsCommand, forumStatusCommand } from './commands/forum.js';
 
 // Get package.json version
 const __filename = fileURLToPath(import.meta.url);
@@ -62,6 +63,7 @@ program
   .description('Create a new session and launch AI agent')
   .option('--role <role-name>', 'Load role context')
   .option('--cli <cli-tool>', 'Override default CLI (cursor-agent, claude, codex, gemini)')
+  .option('--prompt-file <path>', 'Append this file to the first prompt as the task')
   .action(async (sessionName: string, options) => {
     await createCommand(sessionName, options);
   });
@@ -203,6 +205,70 @@ mcpCommand
   .description('Remove an MCP server')
   .action(async (serverName: string) => {
     await mcpRemoveCommand(serverName);
+  });
+
+// a1 panel
+program
+  .command('panel')
+  .description('Session manager, with the forum one tab away (runs in its own tmux)')
+  .option('--forum', 'Open only the forum, without tmux')
+  .option('--stop', "Stop this project's panel and every session running in it")
+  .addOption(new Option('--manager').hideHelp())
+  .action(async (options) => {
+    // Loaded lazily so other commands don't pay for Ink/React
+    const { panelCommand } = await import('./commands/panel.js');
+    await panelCommand(options);
+  });
+
+// a1 resume <session-name>
+program
+  .command('resume <session-name>')
+  .description("Reopen a session's worktree and continue its last conversation")
+  .option('--cli <cli-tool>', 'Override default CLI (cursor-agent, claude, codex, gemini)')
+  .action(async (sessionName: string, options) => {
+    const { resumeCommand } = await import('./commands/resume.js');
+    await resumeCommand(sessionName, options);
+  });
+
+// a1 forum
+const forumCommand = program.command('forum').description('Report to `a1 panel` and queue forum drafts');
+
+const collect = (value: string, previous: string[] = []) => [...previous, value];
+
+forumCommand
+  .command('status')
+  .description('Report this session’s state to the panel')
+  .option('--session <name>', 'Session name (default: the current a1 session)')
+  .option('--state <state>', 'starting | working | blocked | review | done | ended')
+  .option('--summary <text>', 'One line on what the session is doing')
+  .option('--pr <number>', 'Pull request number')
+  .option('--linear <id>', 'Linear issue id, e.g. FE-2659')
+  .option('--room <uuid>', 'Forum room this session is linked to (repeatable)', collect)
+  .action(async (options) => {
+    await forumStatusCommand(options);
+  });
+
+forumCommand
+  .command('draft')
+  .description('Queue a forum post for approval in the panel (never posts)')
+  .option('--room <uuid>', 'Reply in this forum room')
+  .option('--thread <id>', 'Reply in this thread (th_… or #ref)')
+  .option('--new-room <title>', 'Open a new forum post with this title')
+  .option('--description <text>', 'New post: description (max 1000 chars)')
+  .option('--tenant', 'New post: tenant-public instead of global (Gnosis-only)')
+  .option('--title <text>', 'Label shown in the panel (usually the room name)')
+  .option('--body <text>', 'Comment text')
+  .option('--body-file <path>', 'Read the comment text from a file')
+  .option('--source <name>', 'Who drafted it (default: a1:<session>)')
+  .action(async (options) => {
+    await forumDraftCommand(options);
+  });
+
+forumCommand
+  .command('drafts')
+  .description('List drafts waiting for approval')
+  .action(async () => {
+    await forumDraftsCommand();
   });
 
 program.parse();

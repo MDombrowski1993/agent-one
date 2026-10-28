@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import fs from 'fs-extra';
 import inquirer from 'inquirer';
 import { loadConfig } from '../config/manager.js';
 import { CliTool } from '../config/types.js';
@@ -10,10 +11,13 @@ import { composeRoleContext, composeAlwaysOnContext } from '../services/context-
 import { launchCLI } from '../services/cli-launcher.js';
 import { printBanner } from '../utils/branding.js';
 import { printLoadedSkills } from '../utils/skill-display.js';
+import { writeSessionStatus } from '../services/forum/sessions.js';
 
 interface CreateOptions {
   role?: string;
   cli?: CliTool;
+  /** File whose contents are appended to the first prompt (the panel's forum hand-off) */
+  promptFile?: string;
 }
 
 export async function createCommand(
@@ -64,6 +68,11 @@ export async function createCommand(
       printLoadedSkills(composed.skills);
     }
 
+    if (options.promptFile) {
+      const task = await fs.readFile(options.promptFile, 'utf-8');
+      roleContext = [roleContext, '## Task\n\n' + task].filter(Boolean).join('\n\n');
+    }
+
     // Create session
     const { path: sessionPath, isGit } = await createSession(config, sessionName);
 
@@ -79,13 +88,23 @@ export async function createCommand(
     console.log(chalk.cyan(`\nLaunching ${cliTool}...`));
     console.log(chalk.dim('─'.repeat(50)));
 
+    // The agent reports into `a1 panel` with `a1 forum status`, which reads A1_SESSION
+    process.env.A1_SESSION = sessionName;
+    await reportStatus(config, sessionName, 'starting');
     const exitCode = await launchCLI(cliTool, sessionPath, roleContext, config);
+    await reportStatus(config, sessionName, 'ended');
 
     // After CLI exits
     console.log(chalk.dim('─'.repeat(50)));
 
     if (isGit) {
       console.log(chalk.dim(`  To push: cd ${sessionPath} && git push -u origin ${sessionName}`));
+    }
+
+    // In a1 panel the pane stays open after exit; r there resumes, so don't block it on a prompt
+    if (process.env.A1_PANEL) {
+      console.log(chalk.dim('  Session ended. Press r in a1 panel to resume it.'));
+      process.exit(exitCode);
     }
 
     const { cleanup } = await inquirer.prompt([
@@ -113,5 +132,18 @@ export async function createCommand(
   } catch (error) {
     console.error(chalk.red(`\nError: ${error}`));
     process.exit(1);
+  }
+}
+
+/** Panel bookkeeping must never stop a session from starting or exiting. */
+async function reportStatus(
+  config: Parameters<typeof writeSessionStatus>[0],
+  sessionName: string,
+  state: 'starting' | 'ended'
+): Promise<void> {
+  try {
+    await writeSessionStatus(config, sessionName, { state });
+  } catch {
+    // ignore
   }
 }
